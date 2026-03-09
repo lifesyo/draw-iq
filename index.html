@@ -2957,8 +2957,21 @@ function stopPlay(finished){
       updateFrameUI();
     }
   } else {
-    // 再生完了：最終フレームに移動（表示はそのまま維持）
-    currentFrame = frames.length - 1;
+    // 再生完了：最終フレームの結果位置で停止し、矢印も復元
+    const lastIdx = frames.length - 1;
+    currentFrame = lastIdx;
+    const lastF = frames[lastIdx];
+    if(lastF){
+      // 結果位置（矢印の終点）があればそれを使う
+      if(lastF.resultPlayers){
+        players = cloneP(lastF.resultPlayers);
+      } else {
+        players = cloneP(lastF.players);
+      }
+      arrows = cloneA(lastF.arrows);
+      miscs = lastF.miscs ? JSON.parse(JSON.stringify(lastF.miscs)) : [];
+      render();
+    }
     updateFrameUI();
   }
   _pausedElapsed = 0; _pausedFromF = null; _pausedToF = null;
