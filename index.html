@@ -4,15 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Draw IQ">
-<meta name="theme-color" content="#0d1117">
-<meta name="description" content="バスケットボール戦術作戦板アプリ - オフライン対応">
 <title>Draw IQ - Basketball Strategy Board</title>
-<link rel="manifest" href="manifest.json">
-<link rel="apple-touch-icon" href="apple-touch-icon.png">
-<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
-<link rel="icon" type="image/png" sizes="16x16" href="favicon-16.png">
 <!-- Firebase -->
 <script type="module" id="fb-init">
 // ★ ここにFirebaseの設定を貼り付けてください ★
@@ -386,7 +378,6 @@ body{font-family:'Noto Sans JP',sans-serif;background:var(--bg);color:var(--text
   <button class="hbtn" onclick="undo()" title="元に戻す (⌘Z)">↩</button>
   <button class="h-new" onclick="newPlay()">＋ 新規</button>
   <button class="h-new" style="background:#fff;color:var(--accent);border-color:#fff;font-weight:800" onclick="openInlineSaveHeader()">💾 保存</button>
-  <button id="pwa-install-btn" class="h-new" style="display:none;background:#4a9eff;border-color:#4a9eff;" onclick="pwaInstall()">📲 インストール</button>
   <button id="btn-auth" class="btn-auth" onclick="handleAuth()" title="Googleログイン">
     <span id="auth-avatar" style="display:none;width:22px;height:22px;border-radius:50%;overflow:hidden;flex-shrink:0">
       <img id="auth-avatar-img" style="width:100%;height:100%;object-fit:cover">
@@ -789,8 +780,6 @@ async function syncFromCloud(){
       }
       updatePlaysUI();
       showSyncBadge('☁️ クラウドから読み込みました');
-      // ローカルにも保存（オフライン用）
-      if(typeof saveToLocal === 'function') saveToLocal();
     }
   } catch(e){ console.error('sync error',e); }
 }
@@ -2933,31 +2922,38 @@ function startPlay(){
       if(nextTo){
         stepFrom(fi);
       } else {
-        // 再生完了 — 最終フレームの結果状態を表示
+        // 再生完了 — 最終フレームの結果状態を維持して停止
         const finalF = getFrame(fi);
         if(finalF){
           players = cloneP(finalF.players);
           arrows = cloneA(finalF.arrows);
+          miscs = finalF.miscs ? JSON.parse(JSON.stringify(finalF.miscs)) : [];
           render();
         }
-        stopPlay();
+        stopPlay(true); // true = 再生完了（位置復元しない）
       }
     });
   }
 }
-function stopPlay(){
+function stopPlay(finished){
   isPlaying=false;
   if(animTimer){cancelAnimationFrame(animTimer);animTimer=null;}
   const bp=document.getElementById('btn-play');bp.textContent='▶ 再生';bp.className='btn primary';
   document.getElementById('btn-stop').style.display='none';
   _tempResultFrame = null;
-  // 現在のフレーム位置に復元
-  if(currentFrame >= frames.length) currentFrame = frames.length - 1;
-  if(currentFrame >= 0 && currentFrame < frames.length){
-    players = cloneP(frames[currentFrame].players);
-    arrows = cloneA(frames[currentFrame].arrows);
-    miscs = frames[currentFrame].miscs ? JSON.parse(JSON.stringify(frames[currentFrame].miscs)) : [];
-    render();
+  if(!finished){
+    // 手動停止：現在のフレーム位置に復元
+    if(currentFrame >= frames.length) currentFrame = frames.length - 1;
+    if(currentFrame >= 0 && currentFrame < frames.length){
+      players = cloneP(frames[currentFrame].players);
+      arrows = cloneA(frames[currentFrame].arrows);
+      miscs = frames[currentFrame].miscs ? JSON.parse(JSON.stringify(frames[currentFrame].miscs)) : [];
+      render();
+      updateFrameUI();
+    }
+  } else {
+    // 再生完了：最終フレームに移動（表示はそのまま維持）
+    currentFrame = frames.length - 1;
     updateFrameUI();
   }
   _pausedElapsed = 0; _pausedFromF = null; _pausedToF = null;
@@ -4441,184 +4437,6 @@ if(window.innerWidth<600){
 }
 newPlay();
 resize();
-
-// ═══════════════════════════════════════
-//  PWA: Service Worker 登録
-// ═══════════════════════════════════════
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('./sw.js')
-      .then(reg => {
-        console.log('SW registered:', reg.scope);
-        // 新バージョン検出時に通知
-        reg.addEventListener('updatefound', () => {
-          const nw = reg.installing;
-          nw.addEventListener('statechange', () => {
-            if (nw.state === 'installed' && navigator.serviceWorker.controller) {
-              showSyncBadge('🔄 新しいバージョンがあります。リロードしてください');
-            }
-          });
-        });
-      })
-      .catch(err => console.log('SW registration failed:', err));
-  });
-}
-
-// ═══════════════════════════════════════
-//  IndexedDB ローカルストレージ
-// ═══════════════════════════════════════
-const IDB_NAME = 'draw-iq-db';
-const IDB_VERSION = 1;
-const IDB_STORE = 'appdata';
-
-function openIDB() {
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open(IDB_NAME, IDB_VERSION);
-    req.onupgradeneeded = e => {
-      const db = e.target.result;
-      if (!db.objectStoreNames.contains(IDB_STORE)) {
-        db.createObjectStore(IDB_STORE);
-      }
-    };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
-}
-
-async function idbSave(key, value) {
-  const db = await openIDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(IDB_STORE, 'readwrite');
-    tx.objectStore(IDB_STORE).put(value, key);
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-  });
-}
-
-async function idbLoad(key) {
-  const db = await openIDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(IDB_STORE, 'readonly');
-    const req = tx.objectStore(IDB_STORE).get(key);
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
-}
-
-// ── ローカル自動保存 ──
-function stripThumbsForSave(list) {
-  return list.map(p => {
-    const cp = {...p};
-    if (cp.frames) cp.frames = cp.frames.map(f => {
-      const fc = {...f};
-      delete fc._hdThumb;
-      delete fc.thumbnail;
-      return fc;
-    });
-    return cp;
-  });
-}
-
-async function saveToLocal() {
-  try {
-    await idbSave('plays', stripThumbsForSave(plays));
-    await idbSave('drills', stripThumbsForSave(drills));
-    await idbSave('playFolders', playFolders);
-    await idbSave('drillFolders', drillFolders);
-    await idbSave('lastSaved', Date.now());
-  } catch(e) { console.error('Local save error:', e); }
-}
-
-async function loadFromLocal() {
-  try {
-    const lPlays = await idbLoad('plays');
-    const lDrills = await idbLoad('drills');
-    const lPF = await idbLoad('playFolders');
-    const lDF = await idbLoad('drillFolders');
-    if (lPlays && lPlays.length > 0) plays = lPlays;
-    if (lDrills && lDrills.length > 0) drills = lDrills;
-    if (lPF && lPF.length > 0) playFolders = lPF;
-    if (lDF && lDF.length > 0) drillFolders = lDF;
-    updatePlaysUI();
-    console.log('Loaded from local:', plays.length, 'plays,', drills.length, 'drills');
-  } catch(e) { console.error('Local load error:', e); }
-}
-
-// ── オフライン同期キュー ──
-let _pendingSync = false;
-
-const _origSyncToCloud = syncToCloud;
-syncToCloud = async function() {
-  // 常にローカルにも保存
-  await saveToLocal();
-  // オンラインならクラウド同期
-  if (navigator.onLine && currentUser) {
-    try {
-      await _origSyncToCloud();
-      _pendingSync = false;
-      await idbSave('pendingSync', false);
-    } catch(e) {
-      _pendingSync = true;
-      await idbSave('pendingSync', true);
-      console.log('Cloud sync failed, queued for later');
-    }
-  } else if (currentUser) {
-    _pendingSync = true;
-    await idbSave('pendingSync', true);
-    showSyncBadge('📱 オフライン保存しました');
-  }
-};
-
-// ネット復帰時に自動同期
-window.addEventListener('online', async () => {
-  const pending = await idbLoad('pendingSync');
-  if (pending && currentUser) {
-    showSyncBadge('☁️ オンライン復帰 - 同期中...');
-    try {
-      await _origSyncToCloud();
-      _pendingSync = false;
-      await idbSave('pendingSync', false);
-      showSyncBadge('☁️ 同期完了');
-    } catch(e) {
-      showSyncBadge('⚠️ 同期エラー');
-    }
-  }
-});
-
-window.addEventListener('offline', () => {
-  showSyncBadge('📱 オフラインモード');
-});
-
-// ── 起動時にローカルデータをロード ──
-(async function initLocalData() {
-  await loadFromLocal();
-  // Firebase認証済みでオンラインならクラウドからも取得（onFbAuthChangeで処理）
-})();
-
-// ── PWAインストールプロンプト ──
-let _deferredInstallPrompt = null;
-window.addEventListener('beforeinstallprompt', e => {
-  e.preventDefault();
-  _deferredInstallPrompt = e;
-  // インストールボタンを表示
-  const ib = document.getElementById('pwa-install-btn');
-  if (ib) ib.style.display = '';
-});
-
-function pwaInstall() {
-  if (!_deferredInstallPrompt) return;
-  _deferredInstallPrompt.prompt();
-  _deferredInstallPrompt.userChoice.then(result => {
-    _deferredInstallPrompt = null;
-    const ib = document.getElementById('pwa-install-btn');
-    if (ib) ib.style.display = 'none';
-  });
-}
-
-window.addEventListener('appinstalled', () => {
-  showSyncBadge('✅ アプリをインストールしました');
-  _deferredInstallPrompt = null;
-});
 </script>
 </body>
 </html>
