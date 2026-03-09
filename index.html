@@ -1596,8 +1596,10 @@ function drawPlayer(p, alpha=1) {
 //  Uses the CLOSEST offense player to the arrow endpoint (no distance limit).
 // ═══════════════════════════════════════
 function findPassReceiver(arrowList, playerList, allArrows) {
-  const ballHolder = playerList.find(p=>p.hasBall);
-  const senderType = ballHolder ? ballHolder.type : 'offense';
+  // 複数ボール保持者対応：各パス矢印ごとにsender→receiverを特定
+  // 戻り値: receiverId の配列（重複なし）
+  const ballHolders = playerList.filter(p=>p.hasBall);
+  const senderType = ballHolders.length > 0 ? ballHolders[0].type : 'offense';
 
   // スクリーンをかけている選手を特定（パス対象から除外）
   const screenPlayerIds = new Set();
@@ -1628,47 +1630,66 @@ function findPassReceiver(arrowList, playerList, allArrows) {
     }
   });
 
-  let receiverId = null;
-  let bestScore = Infinity;
+  // 各パス矢印のsenderを特定（ボール保持者のみ）
+  const senderIds = new Set();
+  arrowList.forEach(a => {
+    if(a.atype !== 'pass' && a.atype !== 'handoff') return;
+    if(!isBlack(a)) return;
+    let best=null, bestD=Infinity;
+    playerList.forEach(p => {
+      if(!p.hasBall) return; // ボール保持者のみsender候補
+      const d = Math.hypot(p.x-a.pts[0].x, p.y-a.pts[0].y);
+      if(d<bestD){best=p;bestD=d;}
+    });
+    if(best) senderIds.add(best.id);
+  });
+
+  const receiverIds = [];
   arrowList.forEach(a => {
     if(a.atype !== 'pass' && a.atype !== 'handoff') return;
     if(!isBlack(a)) return;
     const ep = a.pts[a.pts.length-1];
-    // パス矢印の方向ベクトル
     const pp = a.pts.length >= 2 ? a.pts[a.pts.length-2] : a.pts[0];
     const dirX = ep.x - pp.x, dirY = ep.y - pp.y;
     const dirLen = Math.hypot(dirX, dirY) || 1;
 
+    let bestId = null, bestScore = Infinity;
     playerList.forEach(p => {
       if(p.type !== senderType) return;
-      if(p.hasBall) return;
+      if(senderIds.has(p.id)) return; // senderは除外
       if(screenPlayerIds.has(p.id)) return;
-      // 選手の位置（カット先があればそちらを使う）
       const dest = cutDestMap[p.id] || p;
       const dx = dest.x - ep.x, dy = dest.y - ep.y;
       const dist = Math.hypot(dx, dy);
-      // 矢印方向との角度を計算
       const dot = (dirX * dx + dirY * dy) / (dirLen * (dist || 1));
-      // 矢印の延長線上にいるほどスコアが良い（角度ペナルティ）
-      // dot=1（真正面）→ペナルティ0, dot=0（90度）→ペナルティ大, dot<0（後方）→除外
-      if(dot < -0.3 && dist > 60) return; // 矢印と反対方向で遠い場合は除外
+      if(dot < -0.3 && dist > 60) return;
       const anglePenalty = Math.max(0, 1 - dot) * 120;
       const score = dist + anglePenalty;
-      if(score < bestScore) { bestScore=score; receiverId=p.id; }
+      if(score < bestScore) { bestScore=score; bestId=p.id; }
     });
+    if(bestId && !receiverIds.includes(bestId)) receiverIds.push(bestId);
   });
-  return receiverId;
+  // 後方互換：単一の場合はそのidを返す、複数の場合は配列
+  return receiverIds.length === 1 ? receiverIds[0] : (receiverIds.length > 0 ? receiverIds : null);
 }
 
 function applyPassTransfer() {
-  // 赤色パスは選択肢表示のみ、ボール転送しない
   const passArrows = arrows.filter(a => (a.atype === 'pass' || a.atype === 'handoff') && (!a.color || a.color === '#111111' || a.color === '#111'));
   if(passArrows.length === 0) return;
-  const receiverId = findPassReceiver(passArrows, players, arrows);
-  if(!receiverId) return;
-  players.forEach(p => { p.hasBall = false; });
-  const r = players.find(p => p.id === receiverId);
-  if(r) r.hasBall = true;
+  const receiverResult = findPassReceiver(passArrows, players, arrows);
+  if(!receiverResult) return;
+  const receiverIds = Array.isArray(receiverResult) ? receiverResult : [receiverResult];
+  // sender達のボールを消す
+  const isBlack = a => (!a.color || a.color === '#111111' || a.color === '#111');
+  const senderIds = new Set();
+  passArrows.forEach(a => {
+    if(!isBlack(a)) return;
+    let best=null, bestD=Infinity;
+    players.forEach(p => {if(!p.hasBall) return; const d=Math.hypot(p.x-a.pts[0].x,p.y-a.pts[0].y);if(d<bestD){best=p;bestD=d;}});
+    if(best) senderIds.add(best.id);
+  });
+  senderIds.forEach(id => { const p=players.find(p=>p.id===id); if(p) p.hasBall=false; });
+  receiverIds.forEach(id => { const r=players.find(p=>p.id===id); if(r) r.hasBall=true; });
 }
 
 // ═══════════════════════════════════════
@@ -1841,11 +1862,6 @@ function render(fromF=null, toF=null, moveT=0, arrowT=null, steps=null) {
           drawArrow(s.arrow, alpha, prog);
         }
       });
-      // pamに入らなかったハンドオフスタンプを直接描画
-      const _stepArrows = new Set(steps.map(s=>s.arrow));
-      fromF.arrows.filter(a => isBlack(a) && a.atype === 'handoff' && !_stepArrows.has(a)).forEach(a => {
-        drawArrow(a, 0.8);
-      });
       // 赤色（選択肢）矢印
       const arrowEase = _easeF(arrowT);
       drawAllArrows(fromOption, Math.max(0, 1 - arrowEase * 0.8));
@@ -1881,6 +1897,7 @@ function render(fromF=null, toF=null, moveT=0, arrowT=null, steps=null) {
       const purePassSteps = passSteps.filter(s=>s.arrow.atype==='pass');
       const shotSteps = passSteps.filter(s=>s.arrow.atype==='shot');
       const passEase = passSteps.length > 0 ? _easeF(passSteps[0].t) : 0;
+
       const hasPass = purePassSteps.length > 0 || handoffSteps.length > 0;
       const hasShot = shotSteps.length > 0;
 
@@ -1917,49 +1934,113 @@ function render(fromF=null, toF=null, moveT=0, arrowT=null, steps=null) {
             py = arrowPos.y + offY * (1 - ease);
           }
           if(hasShot && fp.hasBall && passEase > 0.5) hasBall = false;
+          // orphanHandoff: ドリブル移動者がボール保持者でハンドオフする場合
+          if(hasPass && fp.hasBall && passEase > 0.5) hasBall = false;
           drawPlayer({...fp, x:px, y:py, hasBall});
         } else {
           if(hasShot && fp.hasBall && passEase > 0.5) hasBall = false;
+          // orphanPass/Handoffのsender（pamに入っていないが、パス矢印の始点に近いボール保持者）
+          if(hasPass && fp.hasBall && passEase > 0.5) hasBall = false;
           drawPlayer({...fp, hasBall});
         }
       });
 
       // --- ボール飛行 ---
-      if(hasPass && passEase > 0){
-        if(handoffSteps.length > 0 && fromF.passReceiverId){
-          const pamF = fromF.playerArrowMap || {};
-          const senderEntry = Object.entries(pamF).find(([id,v])=>v.isPass && v.arrow && v.arrow.atype === 'handoff');
+      // passEaseを計算（orphanHandoff時はmoveTを使用）
+      const _effectivePassEase = passEase;
+      if(hasPass && _effectivePassEase > 0){
+        // 全パス/ハンドオフ矢印からボール飛行を生成
+        const pamF = fromF.playerArrowMap || {};
+        const allPassArrows = (fromF.arrows||[]).filter(a => isBlack(a) && (a.atype === 'pass' || a.atype === 'handoff'));
+        const _recvIds = fromF.passReceiverId ? (Array.isArray(fromF.passReceiverId) ? fromF.passReceiverId : [fromF.passReceiverId]) : [];
+
+        allPassArrows.forEach(pa => {
+          // このパス矢印のsenderを特定
           let senderP = null;
-          if(senderEntry) senderP = fromF.players.find(p=>String(p.id)===String(senderEntry[0]));
-          else if(handoffSteps.length > 0){
-            const hStart = handoffSteps[0].arrow.pts[0];
+          const sEntry = Object.entries(pamF).find(([id,v])=>v.arrow === pa);
+          if(sEntry) senderP = fromF.players.find(p=>String(p.id)===String(sEntry[0]));
+          if(!senderP){
+            // pamに入っていない場合、矢印始点に最も近い選手
             let bestD = Infinity;
-            fromF.players.forEach(p=>{const d=Math.hypot(p.x-hStart.x,p.y-hStart.y);if(d<bestD){bestD=d;senderP=p;}});
-          } else senderP = fromF.players.find(p=>p.hasBall);
-          const recvId = String(fromF.passReceiverId);
-          const recvCutEntry = Object.entries(pamF).find(([id,v])=>!v.isPass&&String(id)===recvId);
-          let recvEndPos;
-          if(recvCutEntry) recvEndPos = sampleArrow(recvCutEntry[1].arrow, 1);
-          else recvEndPos = fromF.players.find(p=>String(p.id)===recvId);
-          if(senderP && recvEndPos){
-            drawFlyingBall([{pts:[{x:senderP.x,y:senderP.y},{x:recvEndPos.x,y:recvEndPos.y}],atype:'pass'}], passEase);
+            fromF.players.forEach(p => {
+              const d = Math.hypot(p.x-pa.pts[0].x, p.y-pa.pts[0].y);
+              if(d<bestD){bestD=d; senderP=p;}
+            });
           }
-        } else if(purePassSteps.length > 0){
-          drawFlyingBall(purePassSteps.map(s=>s.arrow), passEase);
-        }
+          if(!senderP) return;
+          // senderの現在位置（移動中なら移動先）
+          let sx, sy;
+          const sStep = activeStepMap[senderP.id];
+          if(sStep && !sStep.isPass){
+            const sE = _easeF(sStep.t);
+            const aP = sampleArrow(sStep.arrow, sE);
+            const aS = sStep.arrow.pts[0];
+            sx = aP.x + (senderP.x-aS.x)*(1-sE);
+            sy = aP.y + (senderP.y-aS.y)*(1-sE);
+          } else { sx=senderP.x; sy=senderP.y; }
+
+          // receiverを特定（パス矢印の終点に最も近いレシーバー）
+          const ep = pa.pts[pa.pts.length-1];
+          let recvP = null, recvD = Infinity;
+          _recvIds.forEach(rid => {
+            const rp = fromF.players.find(p=>String(p.id)===String(rid));
+            if(!rp) return;
+            // レシーバーのカット先を考慮
+            const rEntry = pamF[rp.id];
+            let rx, ry;
+            if(rEntry && !rEntry.isPass){ const rEnd=rEntry.arrow.pts[rEntry.arrow.pts.length-1]; rx=rEnd.x; ry=rEnd.y; }
+            else { rx=rp.x; ry=rp.y; }
+            const d = Math.hypot(rx-ep.x, ry-ep.y);
+            if(d < recvD){ recvD=d; recvP=rp; }
+          });
+          if(!recvP){
+            // レシーバーリストにない場合、矢印終点に最も近い非sender選手
+            fromF.players.forEach(p => {
+              if(p.id === senderP.id) return;
+              if(p.type !== senderP.type) return;
+              const rEntry = pamF[p.id];
+              let rx, ry;
+              if(rEntry && !rEntry.isPass){ const rEnd=rEntry.arrow.pts[rEntry.arrow.pts.length-1]; rx=rEnd.x; ry=rEnd.y; }
+              else { rx=p.x; ry=p.y; }
+              const d = Math.hypot(rx-ep.x, ry-ep.y);
+              if(d < recvD){ recvD=d; recvP=p; }
+            });
+          }
+          if(!recvP) return;
+          // receiverの移動先
+          let rx, ry;
+          const rStep = activeStepMap[recvP.id];
+          if(rStep && !rStep.isPass){
+            const rE = _easeF(rStep.t);
+            const rP = sampleArrow(rStep.arrow, rE);
+            const rS = rStep.arrow.pts[0];
+            rx = rP.x + (recvP.x-rS.x)*(1-rE);
+            ry = rP.y + (recvP.y-rS.y)*(1-rE);
+          } else { rx=recvP.x; ry=recvP.y; }
+
+          drawFlyingBall([{pts:[{x:sx,y:sy},{x:rx,y:ry}],atype:'pass'}], _effectivePassEase);
+        });
       }
       // Receiver ○ fades in
-      if(hasPass && passEase > 0.75){
-        const alpha = Math.min(1, (passEase-0.75)/0.25);
-        const recvP = fromF.players.find(p=>p.id===fromF.passReceiverId);
-        if(recvP){
+      if(hasPass && _effectivePassEase > 0.75){
+        const alpha = Math.min(1, (_effectivePassEase-0.75)/0.25);
+        const _recvIds2 = fromF.passReceiverId ? (Array.isArray(fromF.passReceiverId) ? fromF.passReceiverId : [fromF.passReceiverId]) : [];
+        _recvIds2.forEach(rid => {
+          const recvP = fromF.players.find(p=>String(p.id)===String(rid));
+          if(!recvP) return;
           const recvS = activeStepMap[recvP.id];
           let rx=recvP.x, ry=recvP.y;
-          if(recvS && !recvS.isPass){ const pos=sampleArrow(recvS.arrow,1); rx=pos.x; ry=pos.y; }
+          if(recvS && !recvS.isPass){
+            const rEase = _easeF(recvS.t);
+            const rPos=sampleArrow(recvS.arrow, rEase);
+            const rStart = recvS.arrow.pts[0];
+            const rox = recvP.x - rStart.x, roy = recvP.y - rStart.y;
+            rx = rPos.x + rox*(1-rEase); ry = rPos.y + roy*(1-rEase);
+          }
           ctx.save(); ctx.globalAlpha=alpha;
           drawPlayer({...recvP, x:rx, y:ry, hasBall:true});
           ctx.restore(); ctx.globalAlpha=1;
-        }
+        });
       }
       // Shot ball
       if(hasShot && passEase > 0){
@@ -2036,24 +2117,35 @@ function render(fromF=null, toF=null, moveT=0, arrowT=null, steps=null) {
         else drawPlayer({...fp,hasBall});
       });
       if(hasPass){
-        if(fromHandoff.length>0&&fromF.passReceiverId){
-          const pamF=fromF.playerArrowMap||{};
-          const se=Object.entries(pamF).find(([id,v])=>v.isPass&&v.arrow&&v.arrow.atype==='handoff');
-          let sp=null;
-          if(se)sp=fromF.players.find(p=>String(p.id)===String(se[0]));
-          else if(fromHandoff.length>0){const h=fromHandoff[0].pts[0];let bd=Infinity;fromF.players.forEach(p=>{const d=Math.hypot(p.x-h.x,p.y-h.y);if(d<bd){bd=d;sp=p;}});}
-          else sp=fromF.players.find(p=>p.hasBall);
-          const ri=String(fromF.passReceiverId);
-          const rc=Object.entries(pamF).find(([id,v])=>!v.isPass&&String(id)===ri);
-          let re; if(rc)re=sampleArrow(rc[1].arrow,1); else re=fromF.players.find(p=>String(p.id)===ri);
-          if(sp&&re)drawFlyingBall([{pts:[{x:sp.x,y:sp.y},{x:re.x,y:re.y}],atype:'pass'}],ease);
-        } else if(fromPass.length>0) drawFlyingBall(fromPass,ease);
+        const _allPA2 = fromActive.filter(a=>a.atype==='pass'||a.atype==='handoff');
+        _allPA2.forEach(pa => {
+          let sp2=null, bd2=Infinity;
+          fromF.players.forEach(p=>{const d=Math.hypot(p.x-pa.pts[0].x,p.y-pa.pts[0].y);if(d<bd2){bd2=d;sp2=p;}});
+          if(!sp2) return;
+          const ep2=pa.pts[pa.pts.length-1];
+          let rp2=null, rd2=Infinity;
+          fromF.players.forEach(p=>{
+            if(p.id===sp2.id||p.type!==sp2.type) return;
+            const re2=pam[p.id];
+            let rx2=p.x,ry2=p.y;
+            if(re2&&!re2.isPass){const pos2=sampleArrow(re2.arrow,1);rx2=pos2.x;ry2=pos2.y;}
+            const d2=Math.hypot(rx2-ep2.x,ry2-ep2.y);
+            if(d2<rd2){rd2=d2;rp2={x:rx2,y:ry2};}
+          });
+          if(sp2&&rp2){
+            const spPos=pam[sp2.id]&&!pam[sp2.id].isPass?sampleArrow(pam[sp2.id].arrow,ease):sp2;
+            drawFlyingBall([{pts:[{x:spPos.x,y:spPos.y},{x:rp2.x,y:rp2.y}],atype:'pass'}],ease);
+          }
+        });
       }
       if(hasPass&&ease>0.75){
         const al=Math.min(1,(ease-0.75)/0.25);
-        const rp=fromF.players.find(p=>p.id===fromF.passReceiverId);
-        if(rp){const re=pam[rp.id];let rx=rp.x,ry=rp.y;if(re&&!re.isPass){const pos=sampleArrow(re.arrow,ease);rx=pos.x;ry=pos.y;}
-          ctx.save();ctx.globalAlpha=al;drawPlayer({...rp,x:rx,y:ry,hasBall:true});ctx.restore();ctx.globalAlpha=1;}
+        const _rids2=fromF.passReceiverId?(Array.isArray(fromF.passReceiverId)?fromF.passReceiverId:[fromF.passReceiverId]):[];
+        _rids2.forEach(rid2=>{
+          const rp2=fromF.players.find(p=>String(p.id)===String(rid2));
+          if(rp2){const re2=pam[rp2.id];let rx2=rp2.x,ry2=rp2.y;if(re2&&!re2.isPass){const pos2=sampleArrow(re2.arrow,ease);rx2=pos2.x;ry2=pos2.y;}
+            ctx.save();ctx.globalAlpha=al;drawPlayer({...rp2,x:rx2,y:ry2,hasBall:true});ctx.restore();ctx.globalAlpha=1;}
+        });
       }
       if(hasShot){
         fromShot.forEach(a=>{
@@ -2116,13 +2208,7 @@ canvas.addEventListener('pointerdown', e=>{
     const p=hitPlayer(x,y);
     if(p){
       saveUndo();
-      const prevHolder = players.find(pl=>pl.hasBall);
-      // autoFixOverlapの前に位置を記録
-      const fromPos = prevHolder ? {x:prevHolder.x, y:prevHolder.y} : null;
-      const toPos = {x:p.x, y:p.y};
-      players.forEach(pl=>pl.hasBall=false);
-      p.hasBall=true;
-      autoFixOverlap();
+      p.hasBall = !p.hasBall;
       render();
     }
     return;
@@ -2282,7 +2368,7 @@ canvas.addEventListener('click', e=>{
   lastTap=now;lastTapXY=[x,y];
   if(tool==='select'&&isDbl){
     const p=hitPlayer(x,y);
-    if(p&&p.type==='offense'){players.forEach(pl=>{pl.hasBall=false;});p.hasBall=true;render();}
+    if(p&&p.type==='offense'){p.hasBall=!p.hasBall;render();}
     return;
   }
   if(tool==='draw'&&actionType==='curve'){
@@ -2453,9 +2539,18 @@ function addFrame(){
     p.x = ep.x; p.y = ep.y;
   });
   if(receiverId){
-    resultPlayers.forEach(p=>{ p.hasBall=false; });
-    const r = resultPlayers.find(p=>p.id===receiverId);
-    if(r) r.hasBall=true;
+    const receiverIds = Array.isArray(receiverId) ? receiverId : [receiverId];
+    // sender達のボールを消す
+    const _isB = a => (!a.color || a.color === '#111111' || a.color === '#111');
+    const _senderIds = new Set();
+    passArrows.forEach(a => {
+      if(!_isB(a)) return;
+      let best=null, bestD=Infinity;
+      players.forEach(p => {if(!p.hasBall) return; const d=Math.hypot(p.x-a.pts[0].x,p.y-a.pts[0].y);if(d<bestD){best=p;bestD=d;}});
+      if(best) _senderIds.add(best.id);
+    });
+    _senderIds.forEach(id => { const p=resultPlayers.find(p=>p.id===id); if(p) p.hasBall=false; });
+    receiverIds.forEach(id => { const r=resultPlayers.find(p=>p.id===id); if(r) r.hasBall=true; });
   }
 
   const f = {
@@ -2484,11 +2579,20 @@ function addFrame(){
     p.x = ep.x; p.y = ep.y;
   });
 
-  // 4b. Transfer ball
+  // 4b. Transfer ball（senderのみhasBallをfalse、receiverにtrue）
   if(receiverId){
-    players.forEach(p=>{ p.hasBall=false; });
-    const r = players.find(p=>p.id===receiverId);
-    if(r) r.hasBall=true;
+    const _liveRecvIds = Array.isArray(receiverId) ? receiverId : [receiverId];
+    // パス矢印のsender（ボール保持者のみ）のhasBallをfalse
+    const _liveSenderIds = new Set();
+    const _isB3 = a => (!a.color || a.color === '#111111' || a.color === '#111');
+    passArrows.forEach(a => {
+      if(!_isB3(a)) return;
+      let best=null, bestD=Infinity;
+      players.forEach(p => {if(!p.hasBall) return; const d=Math.hypot(p.x-a.pts[0].x,p.y-a.pts[0].y);if(d<bestD){best=p;bestD=d;}});
+      if(best) _liveSenderIds.add(best.id);
+    });
+    _liveSenderIds.forEach(id => { const p=players.find(p=>p.id===id); if(p) p.hasBall=false; });
+    _liveRecvIds.forEach(id => { const r=players.find(p=>p.id===id); if(r) r.hasBall=true; });
   }
 
   // 4c. Clear arrows
@@ -2810,9 +2914,17 @@ function calcResultPlayers(f){
     p.x = ep.x; p.y = ep.y;
   });
   if(f.passReceiverId){
-    result.forEach(p=>{ p.hasBall=false; });
-    const r = result.find(p=>String(p.id)===String(f.passReceiverId));
-    if(r) r.hasBall=true;
+    const receiverIds = Array.isArray(f.passReceiverId) ? f.passReceiverId : [f.passReceiverId];
+    // sender達のボールを消す
+    const _isB2 = a => (!a.color || a.color === '#111111' || a.color === '#111');
+    const _sIds = new Set();
+    (f.arrows||[]).filter(a => _isB2(a) && (a.atype==='pass'||a.atype==='handoff')).forEach(a => {
+      let best=null, bestD=Infinity;
+      f.players.forEach(p => {const d=Math.hypot(p.x-a.pts[0].x,p.y-a.pts[0].y);if(d<bestD){best=p;bestD=d;}});
+      if(best) _sIds.add(best.id);
+    });
+    _sIds.forEach(id => { const p=result.find(p=>String(p.id)===String(id)); if(p) p.hasBall=false; });
+    receiverIds.forEach(id => { const r=result.find(p=>String(p.id)===String(id)); if(r) r.hasBall=true; });
   }
   // 重なり解消: 矢印を遡って重ならない位置に
   const _minD = 36;
@@ -2962,18 +3074,17 @@ function stopPlay(finished){
       updateFrameUI();
     }
   } else {
-    // 再生完了：最終フレームの結果位置で停止し、矢印も復元
+    // 再生完了：最終フレームの結果位置で停止、矢印は表示しない
     const lastIdx = frames.length - 1;
     currentFrame = lastIdx;
     const lastF = frames[lastIdx];
     if(lastF){
-      // 結果位置（矢印の終点）があればそれを使う
       if(lastF.resultPlayers){
         players = cloneP(lastF.resultPlayers);
       } else {
         players = cloneP(lastF.players);
       }
-      arrows = cloneA(lastF.arrows);
+      arrows = []; // 矢印は非表示
       miscs = lastF.miscs ? JSON.parse(JSON.stringify(lastF.miscs)) : [];
       render();
     }
@@ -3030,10 +3141,24 @@ function animTrans(fromF,toF,dur,onDone){
   }
   const sorted = [...entries].sort((a,b) => priority(a) - priority(b));
 
-  // pamに入らなかったハンドオフスタンプを収集
+  // pamに入らなかった黒矢印（ハンドオフ・パス等）を収集
   const _isBlackH = a => (!a.color || a.color === '#111111' || a.color === '#111');
-  const _pamArrows = new Set(Object.values(pam).map(v=>v.arrow));
-  const orphanHandoffs = (fromF.arrows||[]).filter(a => _isBlackH(a) && a.atype === 'handoff' && !_pamArrows.has(a));
+  // pamの矢印と一致判定（cloneされているので参照では一致しない→位置+typeで比較）
+  const _pamArrowKeys = new Set(Object.values(pam).map(v => {
+    const a = v.arrow;
+    return a.atype + ':' + a.pts[0].x.toFixed(1) + ',' + a.pts[0].y.toFixed(1) + '-' + a.pts[a.pts.length-1].x.toFixed(1) + ',' + a.pts[a.pts.length-1].y.toFixed(1);
+  }));
+  const orphanArrows = (fromF.arrows||[]).filter(a => {
+    if(!_isBlackH(a)) return false;
+    const key = a.atype + ':' + a.pts[0].x.toFixed(1) + ',' + a.pts[0].y.toFixed(1) + '-' + a.pts[a.pts.length-1].x.toFixed(1) + ',' + a.pts[a.pts.length-1].y.toFixed(1);
+    return !_pamArrowKeys.has(key);
+  });
+
+  // orphan矢印もsortedに追加（仮のplayerIdを使用）
+  orphanArrows.forEach(a => {
+    const isPass = (a.atype === 'pass' || a.atype === 'handoff' || a.atype === 'shot');
+    sorted.push(['_orphan_' + Math.random(), {arrow: a, isPass}]);
+  });
 
   if(sorted.length === 0){
     if(fromF.resultPlayers) players = cloneP(fromF.resultPlayers);
@@ -3103,6 +3228,20 @@ function resumeAnimTrans(fromF,toF,dur,resumeFrom,onDone){
     return 1;
   }
   const sorted = [...entries].sort((a,b) => priority(a) - priority(b));
+  // orphan矢印も追加
+  const _isBlackR = a => (!a.color || a.color === '#111111' || a.color === '#111');
+  const _pamKeyR = new Set(Object.values(pam).map(v => {
+    const a = v.arrow;
+    return a.atype + ':' + a.pts[0].x.toFixed(1) + ',' + a.pts[0].y.toFixed(1) + '-' + a.pts[a.pts.length-1].x.toFixed(1) + ',' + a.pts[a.pts.length-1].y.toFixed(1);
+  }));
+  (fromF.arrows||[]).filter(a => {
+    if(!_isBlackR(a)) return false;
+    const key = a.atype + ':' + a.pts[0].x.toFixed(1) + ',' + a.pts[0].y.toFixed(1) + '-' + a.pts[a.pts.length-1].x.toFixed(1) + ',' + a.pts[a.pts.length-1].y.toFixed(1);
+    return !_pamKeyR.has(key);
+  }).forEach(a => {
+    const isPass = (a.atype === 'pass' || a.atype === 'handoff' || a.atype === 'shot');
+    sorted.push(['_orphan_' + Math.random(), {arrow: a, isPass}]);
+  });
   if(sorted.length === 0){
     if(fromF.resultPlayers) players = cloneP(fromF.resultPlayers);
     else players = cloneP(toF.players);
