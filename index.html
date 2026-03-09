@@ -1829,8 +1829,13 @@ function render(fromF=null, toF=null, moveT=0, arrowT=null, steps=null) {
         const prog = s.arrowProgress !== undefined ? s.arrowProgress : (s.showArrow ? 1 : 0);
         if(prog <= 0) return;
         if(s.isPass){
-          const alpha = s.t > 0 ? Math.max(0, 1 - _easeF(s.t)*3) : 0.7;
-          drawArrow(s.arrow, alpha, prog);
+          // ハンドオフスタンプはフェードさせず常に表示
+          if(s.arrow.atype === 'handoff'){
+            drawArrow(s.arrow, Math.max(0.3, 1 - _easeF(s.t)*0.5), prog);
+          } else {
+            const alpha = s.t > 0 ? Math.max(0, 1 - _easeF(s.t)*3) : 0.7;
+            drawArrow(s.arrow, alpha, prog);
+          }
         } else {
           const alpha = s.t > 0 ? Math.max(0.15, 1 - _easeF(s.t)*0.5) : 0.7;
           drawArrow(s.arrow, alpha, prog);
@@ -1999,7 +2004,7 @@ function render(fromF=null, toF=null, moveT=0, arrowT=null, steps=null) {
       const hasShot = fromShot.length>0;
       drawAllArrows(fromNonPass, (1-arrowEase)*0.7);
       drawAllArrows(fromPass, Math.max(0,1-arrowEase*3));
-      drawAllArrows(fromHandoff, Math.max(0,1-arrowEase*3));
+      drawAllArrows(fromHandoff, Math.max(0.3, 1-arrowEase*0.5));
       drawAllArrows(fromShot, Math.max(0,1-arrowEase*2));
       drawAllArrows(fromOption, Math.max(0,1-arrowEase*0.8));
       if(document.getElementById('show-trails').checked){
