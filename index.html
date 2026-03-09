@@ -2047,8 +2047,25 @@ function render(fromF=null, toF=null, moveT=0, arrowT=null, steps=null) {
         shotSteps.forEach(s => {
           if(!isBlack(s.arrow)) return;
           const shotEnd = s.arrow.pts[s.arrow.pts.length-1];
-          const shooter = fromF.players.find(p=>p.hasBall);
-          const sx = shooter?shooter.x:s.arrow.pts[0].x, sy = shooter?shooter.y:s.arrow.pts[0].y;
+          // シュート矢印の始点に最も近いボール保持者をshooterとする
+          let shooter = null, bestD = Infinity;
+          fromF.players.forEach(p => {
+            if(!p.hasBall) return;
+            const d = Math.hypot(p.x - s.arrow.pts[0].x, p.y - s.arrow.pts[0].y);
+            if(d < bestD){ bestD = d; shooter = p; }
+          });
+          // shooterの現在位置（移動中なら移動先）
+          let sx, sy;
+          if(shooter){
+            const sStep = activeStepMap[shooter.id];
+            if(sStep && !sStep.isPass){
+              const sE = _easeF(sStep.t);
+              const aP = sampleArrow(sStep.arrow, sE);
+              const aS = sStep.arrow.pts[0];
+              sx = aP.x + (shooter.x-aS.x)*(1-sE);
+              sy = aP.y + (shooter.y-aS.y)*(1-sE);
+            } else { sx=shooter.x; sy=shooter.y; }
+          } else { sx=s.arrow.pts[0].x; sy=s.arrow.pts[0].y; }
           const ex = shotEnd.x, ey = shotEnd.y;
           const shotT = passEase;
           if(shotT > 0 && shotT <= 1){
@@ -2553,6 +2570,14 @@ function addFrame(){
     receiverIds.forEach(id => { const r=resultPlayers.find(p=>p.id===id); if(r) r.hasBall=true; });
   }
 
+  // シュートした選手のボールを消す
+  const shotArrows = activeArrows.filter(a => a.atype === 'shot' && (!a.color || a.color === '#111111' || a.color === '#111'));
+  shotArrows.forEach(a => {
+    let best=null, bestD=Infinity;
+    players.forEach(p => {if(!p.hasBall) return; const d=Math.hypot(p.x-a.pts[0].x,p.y-a.pts[0].y);if(d<bestD){best=p;bestD=d;}});
+    if(best){ const rp=resultPlayers.find(p=>p.id===best.id); if(rp) rp.hasBall=false; }
+  });
+
   const f = {
     players: cloneP(players),
     arrows:  cloneA(arrows),
@@ -2594,6 +2619,13 @@ function addFrame(){
     _liveSenderIds.forEach(id => { const p=players.find(p=>p.id===id); if(p) p.hasBall=false; });
     _liveRecvIds.forEach(id => { const r=players.find(p=>p.id===id); if(r) r.hasBall=true; });
   }
+
+  // 4b2. シュートした選手のボールを消す
+  shotArrows.forEach(a => {
+    let best=null, bestD=Infinity;
+    players.forEach(p => {if(!p.hasBall) return; const d=Math.hypot(p.x-a.pts[0].x,p.y-a.pts[0].y);if(d<bestD){best=p;bestD=d;}});
+    if(best) best.hasBall=false;
+  });
 
   // 4c. Clear arrows
   arrows = [];
@@ -2926,6 +2958,13 @@ function calcResultPlayers(f){
     _sIds.forEach(id => { const p=result.find(p=>String(p.id)===String(id)); if(p) p.hasBall=false; });
     receiverIds.forEach(id => { const r=result.find(p=>String(p.id)===String(id)); if(r) r.hasBall=true; });
   }
+  // シュートした選手のボールを消す
+  const _isB2s = a => (!a.color || a.color === '#111111' || a.color === '#111');
+  (f.arrows||[]).filter(a => _isB2s(a) && a.atype==='shot').forEach(a => {
+    let best=null, bestD=Infinity;
+    f.players.forEach(p => {if(!p.hasBall) return; const d=Math.hypot(p.x-a.pts[0].x,p.y-a.pts[0].y);if(d<bestD){best=p;bestD=d;}});
+    if(best){ const rp=result.find(p=>String(p.id)===String(best.id)); if(rp) rp.hasBall=false; }
+  });
   // 重なり解消: 矢印を遡って重ならない位置に
   const _minD = 36;
   const _arrowMap2 = {};
