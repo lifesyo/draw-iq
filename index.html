@@ -1841,6 +1841,11 @@ function render(fromF=null, toF=null, moveT=0, arrowT=null, steps=null) {
           drawArrow(s.arrow, alpha, prog);
         }
       });
+      // pamに入らなかったハンドオフスタンプを直接描画
+      const _stepArrows = new Set(steps.map(s=>s.arrow));
+      fromF.arrows.filter(a => isBlack(a) && a.atype === 'handoff' && !_stepArrows.has(a)).forEach(a => {
+        drawArrow(a, 0.8);
+      });
       // 赤色（選択肢）矢印
       const arrowEase = _easeF(arrowT);
       drawAllArrows(fromOption, Math.max(0, 1 - arrowEase * 0.8));
@@ -3024,6 +3029,11 @@ function animTrans(fromF,toF,dur,onDone){
     return 1;
   }
   const sorted = [...entries].sort((a,b) => priority(a) - priority(b));
+
+  // pamに入らなかったハンドオフスタンプを収集
+  const _isBlackH = a => (!a.color || a.color === '#111111' || a.color === '#111');
+  const _pamArrows = new Set(Object.values(pam).map(v=>v.arrow));
+  const orphanHandoffs = (fromF.arrows||[]).filter(a => _isBlackH(a) && a.atype === 'handoff' && !_pamArrows.has(a));
 
   if(sorted.length === 0){
     if(fromF.resultPlayers) players = cloneP(fromF.resultPlayers);
