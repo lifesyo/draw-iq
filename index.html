@@ -348,6 +348,9 @@ body{font-family:'Noto Sans JP',sans-serif;background:var(--bg);color:var(--text
   .btn-auth.signed-in #auth-label{display:none;}
   .btn-auth.signed-in #auth-avatar{display:block !important;}
 }
+.plan-badge{font-size:9px;font-weight:800;padding:2px 7px;border-radius:6px;letter-spacing:0.5px;user-select:none;}
+.plan-badge.free{background:rgba(255,255,255,0.15);color:var(--text-dim);}
+.plan-badge.pro{background:var(--accent);color:#000;}
 .btn-auth{display:flex;align-items:center;gap:5px;
   background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);
   color:#fff;border-radius:20px;padding:5px 11px;font-size:11px;font-weight:600;
@@ -378,6 +381,7 @@ body{font-family:'Noto Sans JP',sans-serif;background:var(--bg);color:var(--text
   <button class="hbtn" onclick="undo()" title="元に戻す (⌘Z)">↩</button>
   <button class="h-new" onclick="newPlay()">＋ 新規</button>
   <button class="h-new" style="background:#fff;color:var(--accent);border-color:#fff;font-weight:800" onclick="openInlineSaveHeader()">💾 保存</button>
+  <span id="plan-badge" class="plan-badge free" onclick="showUpgradeModal()" style="cursor:pointer">FREE</span>
   <button id="btn-auth" class="btn-auth" onclick="handleAuth()" title="Googleログイン">
     <span id="auth-avatar" style="display:none;width:22px;height:22px;border-radius:50%;overflow:hidden;flex-shrink:0">
       <img id="auth-avatar-img" style="width:100%;height:100%;object-fit:cover">
@@ -718,6 +722,93 @@ function setCurrentFolders(v){ if(_playsTab === 'drills') drillFolders = v; else
 
 let currentUser = null; // Firebase user object
 
+// ── Plan / Subscription ──
+const STRIPE_PK = 'pk_test_51T8xCmLy8RWhsD12mO9u5BjeGNDtpfLKphnus8UKNNGFTCVEpWGJihbKcC2y2QrmxdPSUZUFe1rweJXPMCrGDVBv00siig9b5M';
+const PRICE_MONTHLY = 'price_1T8xK2Ly8RWhsD12V1CvBv4s';
+const PRICE_YEARLY  = 'price_1T8xMeLy8RWhsD12PGsABKPq';
+const FREE_MAX_PLAYS  = 5;
+const FREE_MAX_FRAMES = 3;
+let userPlan = 'free'; // 'free' | 'pro'
+let stripeCustomerId = null;
+
+async function checkSubscription(){
+  if(!currentUser) { userPlan='free'; updatePlanUI(); return; }
+  try{
+    const r = await fetch('/api/check-subscription', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({firebaseUid: currentUser.uid})
+    });
+    const d = await r.json();
+    userPlan = d.plan || 'free';
+    stripeCustomerId = d.stripeCustomerId || null;
+  }catch(e){ console.error('checkSubscription error',e); userPlan='free'; }
+  updatePlanUI();
+}
+
+function updatePlanUI(){
+  const badge = document.getElementById('plan-badge');
+  if(badge){
+    badge.textContent = userPlan==='pro' ? 'PRO' : 'FREE';
+    badge.className = 'plan-badge ' + (userPlan==='pro' ? 'pro' : 'free');
+  }
+}
+
+function isPro(){ return userPlan === 'pro'; }
+
+function showUpgradeModal(){
+  document.getElementById('upgrade-modal').style.display='flex';
+}
+function closeUpgradeModal(){
+  document.getElementById('upgrade-modal').style.display='none';
+}
+
+async function startCheckout(priceId){
+  if(!currentUser){ alert('先にGoogleでログインしてください'); return; }
+  try{
+    const r = await fetch('/api/create-checkout-session', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        priceId,
+        firebaseUid: currentUser.uid,
+        email: currentUser.email
+      })
+    });
+    const d = await r.json();
+    if(d.url) window.location.href = d.url;
+    else alert('決済セッションの作成に失敗しました');
+  }catch(e){ alert('エラー: '+e.message); }
+}
+
+async function openCustomerPortal(){
+  if(!stripeCustomerId){ alert('サブスクリプション情報がありません'); return; }
+  try{
+    const r = await fetch('/api/create-portal-session', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ stripeCustomerId })
+    });
+    const d = await r.json();
+    if(d.url) window.location.href = d.url;
+  }catch(e){ alert('エラー: '+e.message); }
+}
+
+// 制限チェック
+function checkPlayLimit(){
+  if(isPro()) return true;
+  if(plays.length >= FREE_MAX_PLAYS){
+    showUpgradeModal();
+    return false;
+  }
+  return true;
+}
+function checkFrameLimit(){
+  if(isPro()) return true;
+  if(frames.length >= FREE_MAX_FRAMES){
+    showUpgradeModal();
+    return false;
+  }
+  return true;
+}
+
 // ── Auth ──
 window.onFbAuthChange = async function(user){
   currentUser = user;
@@ -731,10 +822,12 @@ window.onFbAuthChange = async function(user){
     if(user.photoURL){ avatarImg.src=user.photoURL; avatar.style.display='block'; }
     // Load cloud data on sign in
     await syncFromCloud();
+    await checkSubscription();
   } else {
     btn.classList.remove('signed-in');
     label.textContent = 'Googleでログイン';
     avatar.style.display = 'none';
+    userPlan = 'free'; stripeCustomerId = null; updatePlanUI();
   }
 };
 
@@ -2503,6 +2596,7 @@ const cloneP = src => src.map(p=>({...p}));
 function isOptionArrow(a){ return a.color && a.color !== '#111111' && a.color !== '#111'; }
 
 function addFrame(){
+  if(!checkFrameLimit()) return;
   // 赤色矢印は全て「選択肢表示のみ」→ 選手移動・ボール転送に使わない
   const activeArrows = arrows.filter(a => !isOptionArrow(a));
 
@@ -3459,6 +3553,20 @@ function renderForExport(expCanvas, expCtx, fromF, toF, t){
   const oy = Math.round((vidH - renderH) / 2);
   expCtx.drawImage(canvas, 0, 0, renderW, renderH, ox, oy, renderW, renderH);
 
+  // 無料プラン: 透かし描画
+  if(!isPro()){
+    expCtx.save();
+    expCtx.globalAlpha = 0.35;
+    expCtx.font = 'bold ' + Math.round(vidW * 0.06) + 'px sans-serif';
+    expCtx.fillStyle = '#ffffff';
+    expCtx.textAlign = 'center';
+    expCtx.textBaseline = 'middle';
+    expCtx.fillText('Draw IQ', vidW/2, vidH/2);
+    expCtx.font = Math.round(vidW * 0.025) + 'px sans-serif';
+    expCtx.fillText('draw-iq-iota.vercel.app', vidW/2, vidH/2 + vidW*0.05);
+    expCtx.restore();
+  }
+
   // メインcanvasを復元
   canvas.width = savedW;
   canvas.height = savedH;
@@ -4006,6 +4114,7 @@ function movePlayToFolder(playId, folderId){
 }
 
 function savePlay(){
+  if(!checkPlayLimit()) return;
   const name=document.getElementById('play-name-input').value.trim()||'無名のプレー';
   const sel=document.getElementById('folder-select');
   const folderId=sel&&sel.value?parseInt(sel.value):null;
@@ -4480,6 +4589,7 @@ function applyTemplate(idx){
 //  PDF EXPORT
 // ═══════════════════════════════════════
 async function exportPDF(){
+  if(!isPro()){ showUpgradeModal(); return; }
   if(frames.length === 0){ alert('フレームがありません。'); return; }
 
   if(!window.jspdf){
@@ -4636,6 +4746,16 @@ function newPlay(){
 }
 
 // ── Init ──
+// 決済結果チェック
+(function(){
+  const params = new URLSearchParams(window.location.search);
+  if(params.get('payment')==='success'){
+    setTimeout(()=>{ alert('🎉 Proプランへのアップグレードが完了しました！'); checkSubscription(); }, 500);
+    window.history.replaceState({}, '', window.location.pathname);
+  } else if(params.get('payment')==='cancelled'){
+    window.history.replaceState({}, '', window.location.pathname);
+  }
+})();
 if(window.innerWidth<600){
   sbOpen=false;
   document.getElementById('sb-wrap').classList.replace('open','closed');
@@ -4644,6 +4764,37 @@ if(window.innerWidth<600){
 newPlay();
 resize();
 </script>
+<!-- Upgrade Modal -->
+<div id="upgrade-modal" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.7);backdrop-filter:blur(4px);display:none;align-items:center;justify-content:center;padding:16px">
+  <div style="background:var(--card);border-radius:16px;max-width:420px;width:100%;padding:28px 24px;position:relative;border:1px solid var(--border)">
+    <button onclick="closeUpgradeModal()" style="position:absolute;top:12px;right:14px;background:none;border:none;font-size:20px;color:var(--text-dim);cursor:pointer">&times;</button>
+    <div style="text-align:center;margin-bottom:20px">
+      <div style="font-size:28px;margin-bottom:4px">🏀</div>
+      <h2 style="margin:0;font-size:20px;color:var(--text)">Draw IQ Pro にアップグレード</h2>
+      <p style="margin:8px 0 0;color:var(--text-dim);font-size:13px">すべての機能を制限なく使えます</p>
+    </div>
+    <div style="background:var(--bg);border-radius:10px;padding:14px;margin-bottom:14px;font-size:13px;color:var(--text)">
+      <div style="margin-bottom:6px">✅ プレイ保存 <b>無制限</b></div>
+      <div style="margin-bottom:6px">✅ フレーム数 <b>無制限</b></div>
+      <div style="margin-bottom:6px">✅ GIF/動画 <b>透かしなし</b></div>
+      <div style="margin-bottom:6px">✅ PDF出力</div>
+      <div style="margin-bottom:6px">✅ 共有リンク生成</div>
+      <div>✅ チームカラー設定</div>
+    </div>
+    <div style="display:flex;gap:10px;margin-bottom:10px">
+      <button onclick="startCheckout(PRICE_MONTHLY)" style="flex:1;padding:14px 8px;border-radius:10px;border:2px solid var(--accent);background:transparent;color:var(--accent);font-size:14px;font-weight:700;cursor:pointer">
+        月額<br><span style="font-size:22px">¥500</span><br><span style="font-size:11px;font-weight:400;opacity:0.7">/月</span>
+      </button>
+      <button onclick="startCheckout(PRICE_YEARLY)" style="flex:1;padding:14px 8px;border-radius:10px;border:2px solid var(--accent);background:var(--accent);color:#000;font-size:14px;font-weight:700;cursor:pointer;position:relative">
+        <span style="position:absolute;top:-10px;right:10px;background:#ff6b6b;color:#fff;font-size:10px;padding:2px 8px;border-radius:10px">お得</span>
+        年額<br><span style="font-size:22px">¥5,000</span><br><span style="font-size:11px;font-weight:400;opacity:0.3">/年（月¥417）</span>
+      </button>
+    </div>
+    <div id="manage-sub-link" style="display:none;text-align:center;margin-top:8px">
+      <a href="#" onclick="openCustomerPortal();return false" style="color:var(--accent);font-size:12px">サブスクリプションを管理</a>
+    </div>
+  </div>
+</div>
 </body>
 </html>
 
