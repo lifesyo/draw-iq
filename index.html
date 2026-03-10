@@ -374,6 +374,10 @@ body{font-family:'Noto Sans JP',sans-serif;background:var(--bg);color:var(--text
   <button class="hbtn" onclick="toggleSB()">☰</button>
   <h1>🏀 <span class="hdr-long">DRAW IQ</span><span class="hdr-short">DIQ</span></h1>
   <div style="width:1px;height:20px;background:rgba(255,255,255,.28);flex-shrink:0"></div>
+  <div class="court-tog">
+  <button id="btn-half" class="active" onclick="setCourt('half')">ハーフ</button>
+  <button id="btn-full" onclick="setCourt('full')">フル</button>
+</div>
   <button class="hbtn" onclick="undo()" title="元に戻す (⌘Z)">↩</button>
   <button class="h-new" onclick="newPlay()">＋ 新規</button>
   <button class="h-new" style="background:#fff;color:var(--accent);border-color:#fff;font-weight:800" onclick="openInlineSaveHeader()">💾 保存</button>
@@ -390,10 +394,6 @@ body{font-family:'Noto Sans JP',sans-serif;background:var(--bg);color:var(--text
   <!-- Sidebar -->
   <div id="sb-wrap" class="open">
     <div id="sb">
-      <div class="court-tog" style="margin-bottom:6px">
-  <button id="btn-half" class="active" onclick="setCourt('half')">ハーフ</button>
-  <button id="btn-full" onclick="setCourt('full')">フル</button>
-</div>
       <div class="sec">ツール</div>
       <button class="tbtn active" id="tool-select" onclick="setTool('select')"><span class="ic">↖</span>選択・移動</button>
       <button class="tbtn" id="tool-draw"   onclick="setTool('draw')">  <span class="ic">➡</span>矢印を描く</button>
