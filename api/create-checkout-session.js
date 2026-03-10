@@ -1,13 +1,22 @@
 const Stripe = require('stripe');
 
 module.exports = async (req, res) => {
+  // CORS headers
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+  
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
   try {
     const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
-    const { uid, email } = req.body;
+    const { uid, email, priceType } = req.body;
 
     if (!uid || !email) {
       return res.status(400).json({ error: 'uid and email are required' });
@@ -25,6 +34,11 @@ module.exports = async (req, res) => {
       });
     }
 
+    // Determine price based on priceType
+    const isYearly = priceType === 'yearly';
+    const unitAmount = isYearly ? 5000 : 500;
+    const interval = isYearly ? 'year' : 'month';
+
     const session = await stripe.checkout.sessions.create({
       customer: customer.id,
       payment_method_types: ['card'],
@@ -34,10 +48,10 @@ module.exports = async (req, res) => {
           currency: 'jpy',
           product_data: {
             name: 'Draw IQ Pro',
-            description: 'ãƒã‚¹ã‚±ä½œæˆ¦æ¿ãƒ—ãƒ­ãƒ—ãƒ©ãƒ³'
+            description: 'バスケットボール作戦板アプリのプロプラン',
           },
-          unit_amount: 500,
-          recurring: { interval: 'month' }
+          unit_amount: unitAmount,
+          recurring: { interval: interval }
         },
         quantity: 1
       }],
