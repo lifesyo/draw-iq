@@ -5,21 +5,21 @@ module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  
+
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
-  
+
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
   try {
     const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
-    const { uid, email, priceType } = req.body;
+    const { priceId, firebaseUid, email } = req.body;
 
-    if (!uid || !email) {
-      return res.status(400).json({ error: 'uid and email are required' });
+    if (!firebaseUid || !email) {
+      return res.status(400).json({ error: 'firebaseUid and email are required' });
     }
 
     // Check if customer already exists
@@ -30,12 +30,12 @@ module.exports = async (req, res) => {
     } else {
       customer = await stripe.customers.create({
         email,
-        metadata: { firebaseUID: uid }
+        metadata: { firebaseUID: firebaseUid }
       });
     }
 
-    // Determine price based on priceType
-    const isYearly = priceType === 'yearly';
+    // Determine price based on priceId
+    const isYearly = priceId === 'yearly';
     const unitAmount = isYearly ? 5000 : 500;
     const interval = isYearly ? 'year' : 'month';
 
@@ -57,7 +57,7 @@ module.exports = async (req, res) => {
       }],
       success_url: `${req.headers.origin || 'https://draw-iq-iota.vercel.app'}?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${req.headers.origin || 'https://draw-iq-iota.vercel.app'}?canceled=true`,
-      metadata: { firebaseUID: uid }
+      metadata: { firebaseUID: firebaseUid }
     });
 
     res.status(200).json({ url: session.url });
