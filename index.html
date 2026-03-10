@@ -734,10 +734,7 @@ let stripeCustomerId = null;
 async function checkSubscription(){
   if(!currentUser) { userPlan='free'; updatePlanUI(); return; }
   try{
-    const r = await fetch('/api/check-subscription', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({firebaseUid: currentUser.uid})
-    });
+    const r = await fetch('/api/check-subscription?uid=' + currentUser.uid);
     const d = await r.json();
     userPlan = d.plan || 'free';
     stripeCustomerId = d.stripeCustomerId || null;
