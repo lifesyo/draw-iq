@@ -3573,6 +3573,7 @@ function renderForExport(expCanvas, expCtx, fromF, toF, t){
 }
 
 function exportVideo(){
+  if(!isPro()){ showUpgradeModal(); return; }
   if(frames.length<2){alert('2フレーム以上が必要です。');return;}
   const device = detectDevice();
   const quality = document.getElementById('exp-quality').value || 'high';
@@ -4772,11 +4773,9 @@ resize();
     </div>
     <div style="background:var(--bg);border-radius:10px;padding:14px;margin-bottom:14px;font-size:13px;color:var(--text)">
       <div style="margin-bottom:6px">✅ プレイ保存 <b>無制限</b></div>
-      <div style="margin-bottom:6px">✅ フレーム数 <b>無制限</b></div>
-      <div style="margin-bottom:6px">✅ GIF/動画 <b>透かしなし</b></div>
-      <div style="margin-bottom:6px">✅ PDF出力</div>
-      <div style="margin-bottom:6px">✅ 共有リンク生成</div>
-      <div>✅ チームカラー設定</div>
+<div style="margin-bottom:6px">✅ フレーム数 <b>無制限</b></div>
+<div style="margin-bottom:6px">✅ GIF/動画 <b>出力</b></div>
+<div>✅ PDF出力</div>
     </div>
     <div style="display:flex;gap:10px;margin-bottom:10px">
       <button onclick="startCheckout(PRICE_MONTHLY)" style="flex:1;padding:14px 8px;border-radius:10px;border:2px solid var(--accent);background:transparent;color:var(--accent);font-size:14px;font-weight:700;cursor:pointer">
