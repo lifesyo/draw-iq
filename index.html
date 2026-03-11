@@ -115,8 +115,11 @@ body{font-family:'Noto Sans JP',sans-serif;background:var(--bg);color:var(--text
 @media(max-width:420px){
   .hdr-long{display:none;}
   .hdr-short{display:inline;}
-  .court-tog{display:none;}
+  #hdr .court-tog{display:none;}
 }
+.sb-court-tog{display:flex;gap:4px;margin-bottom:8px;}
+.sb-court-tog button{flex:1;padding:8px 4px;font-size:12px;font-weight:700;border-radius:6px;border:1px solid var(--border);background:var(--card);color:var(--text-dim);cursor:pointer;font-family:'Noto Sans JP',sans-serif;touch-action:manipulation;}
+.sb-court-tog button.active{background:var(--accent);color:#000;border-color:var(--accent);}
 .hbtn{background:var(--card);border:1px solid var(--border);color:var(--text);width:38px;height:38px;
   border-radius:8px;cursor:pointer;font-size:18px;display:flex;align-items:center;
   justify-content:center;flex-shrink:0;touch-action:manipulation;}
@@ -395,6 +398,10 @@ body{font-family:'Noto Sans JP',sans-serif;background:var(--bg);color:var(--text
   <!-- Sidebar -->
   <div id="sb-wrap" class="open">
     <div id="sb">
+      <div class="sb-court-tog">
+        <button id="sb-btn-half" class="active" onclick="setCourt('half')">ハーフ</button>
+        <button id="sb-btn-full" onclick="setCourt('full')">フル</button>
+      </div>
       <div class="sec">ツール</div>
       <button class="tbtn active" id="tool-select" onclick="setTool('select')"><span class="ic">↖</span>選択・移動</button>
       <button class="tbtn" id="tool-draw"   onclick="setTool('draw')">  <span class="ic">➡</span>矢印を描く</button>
@@ -483,7 +490,6 @@ body{font-family:'Noto Sans JP',sans-serif;background:var(--bg);color:var(--text
 
 <!-- Bottom bar -->
 <div id="bar">
-  <button class="btn" id="bar-court-tog" onclick="setCourt(courtMode==='half'?'full':'half')" style="font-size:11px;padding:6px 8px;">🏟️ハーフ</button>
   <button class="btn success" onclick="addFrame()">📸 追加</button>
   <button class="btn" style="background:#7b1fa2;color:#fff;border-color:#7b1fa2" onclick="exportVideo()">🎬</button>
   <button class="btn" style="background:#d84315;color:#fff;border-color:#d84315" onclick="exportPDF()">📄</button>
@@ -1011,8 +1017,9 @@ function setCourt(mode) {
   // コート切り替え時は選手をベンチに戻す
   frames=[]; currentFrame=-1; currentPlayId=null;
   arrows=[]; freshPlayers(); resize(); updateFrameUI();
-  const bct=document.getElementById('bar-court-tog');if(bct)bct.textContent=mode==='half'?'🏟️ハーフ':'🏟️フル';
-```
+  const sbh=document.getElementById('sb-btn-half');const sbf=document.getElementById('sb-btn-full');
+  if(sbh)sbh.classList.toggle('active',mode==='half');
+  if(sbf)sbf.classList.toggle('active',mode==='full');
 }
 
 // ═══════════════════════════════════════
