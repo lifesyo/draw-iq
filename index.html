@@ -2210,6 +2210,10 @@ function render(fromF=null, toF=null, moveT=0, arrowT=null, steps=null) {
       });
       // 赤色（選択肢）矢印 — 全フェーズで十分に表示
       // 矢印表示フェーズ(moveT=0)では完全に表示、移動フェーズでもしっかり表示
+      if(fromOption.length === 0 && fromF.arrows.length > 0){
+        // デバッグ: 赤矢印が見つからない場合、全矢印のcolor値をログ出力
+        console.warn('[Draw IQ Debug] fromOption is empty. All arrows:', fromF.arrows.map(a => ({atype:a.atype, color:a.color, colorType:typeof a.color})));
+      }
       const optionAlpha = steps.some(s => s.t > 0) ? 0.55 : 0.75;
       drawAllArrows(fromOption, optionAlpha);
 
