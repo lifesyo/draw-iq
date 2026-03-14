@@ -2949,8 +2949,6 @@ function addFrame(){
     memo: '',
     miscs: JSON.parse(JSON.stringify(miscs))
   };
-  // デバッグ: フレーム保存時の矢印色を確認
-  alert('[addFrame デバッグ]\n保存矢印数: ' + f.arrows.length + '\n' + f.arrows.map(a => a.atype + ':' + (a.color||'なし')).join('\n'));
   if(currentFrame>=0&&currentFrame<frames.length-1){ frames.splice(currentFrame+1,0,f); currentFrame++; }
   else{ frames.push(f); currentFrame=frames.length-1; }
 
@@ -3525,6 +3523,17 @@ function buildPlayerArrowMap(f){
 }
 
 function animTrans(fromF,toF,dur,onDone){
+  // デバッグ: 再生時にfromFの矢印データを確認
+  if(!window._diqAnimDebugShown){
+    window._diqAnimDebugShown = true;
+    const isBlackDbg = a => (!a.color || a.color === '#111111' || a.color === '#111');
+    const optDbg = (fromF.arrows||[]).filter(a => !isBlackDbg(a));
+    const actDbg = (fromF.arrows||[]).filter(a => isBlackDbg(a));
+    alert('[animTrans デバッグ]\nfromF.arrows数: ' + (fromF.arrows||[]).length
+      + '\n赤: ' + optDbg.length + ' 黒: ' + actDbg.length
+      + '\n詳細:\n' + (fromF.arrows||[]).map(a => a.atype + ' color=' + JSON.stringify(a.color)).join('\n'));
+    setTimeout(()=>{ window._diqAnimDebugShown = false; }, 3000);
+  }
   // 矢印を1人ずつ順番に表示 → 全員同時に移動
   if(!fromF.playerArrowMap || Object.keys(fromF.playerArrowMap).length === 0){
     fromF.playerArrowMap = buildPlayerArrowMap(fromF);
