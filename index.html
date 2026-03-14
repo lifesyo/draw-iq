@@ -2710,6 +2710,8 @@ canvas.addEventListener('pointerup', e=>{
           smoothed._screenAngle = rawAng;
         }
         const arrow = {pts:smoothed,atype:actionType,color:drawColor};
+        // デバッグ: 矢印保存時の色を確認
+        document.title = 'Draw IQ [保存色:' + drawColor + ']';
         if(smoothed._screenAngle !== undefined) arrow._screenAngle = smoothed._screenAngle;
         // 始点→終点の全体方向を保存（矢印の向きに使用）
         if(freehandPoints.length>=2){
@@ -2787,6 +2789,8 @@ function setColor(el){
   drawColor=el.dataset.color;
   document.querySelectorAll('.cswatch').forEach(d=>d.classList.remove('active'));
   el.classList.add('active');
+  // デバッグ: 色が切り替わったか確認
+  document.title = 'Draw IQ [色:' + drawColor + ']';
 }
 
 // ═══════════════════════════════════════
