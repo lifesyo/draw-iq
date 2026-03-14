@@ -129,7 +129,8 @@ const FIREBASE_CONFIG = {
 };
 
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged }
+import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged,
+         browserLocalPersistence, setPersistence }
   from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, deleteDoc, serverTimestamp }
   from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
@@ -139,6 +140,16 @@ if (FIREBASE_CONFIG) {
   const auth = getAuth(app);
   const db   = getFirestore(app);
   const provider = new GoogleAuthProvider();
+
+  // ── Auth永続化: ブラウザを閉じてもログイン状態を維持 ──
+  setPersistence(auth, browserLocalPersistence).catch(e => console.warn('Auth persistence:', e));
+
+  // ── Firestoreオフラインキャッシュ有効化 ──
+  // enableIndexedDbPersistence は v9/v10 互換
+  try {
+    const { enableIndexedDbPersistence: _enIdb } = await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js');
+    if(_enIdb) _enIdb(db).catch(() => {});
+  } catch(e){}
 
   // Expose to global scope for non-module JS
   window._fbAuth = auth;
@@ -1014,14 +1025,29 @@ window.onFbAuthChange = async function(user){
     btn.classList.add('signed-in');
     label.textContent = user.displayName ? user.displayName.split(' ')[0] : 'ログイン中';
     if(user.photoURL){ avatarImg.src=user.photoURL; avatar.style.display='block'; }
-    // Load cloud data on sign in
+    // クラウド同期（オフラインならIDBフォールバック）
     await syncFromCloud();
-    await checkSubscription();
+    // サブスク確認（オフラインなら前回の状態を維持）
+    if(navigator.onLine){
+      await checkSubscription();
+    }
   } else {
     btn.classList.remove('signed-in');
     label.textContent = 'Googleでログイン';
     avatar.style.display = 'none';
     userPlan = 'free'; stripeCustomerId = null; updatePlanUI();
+    // 未ログインでもIDBからデータ復元
+    if(window._idbLoad){
+      try{
+        const local = await window._idbLoad();
+        if(local.plays && local.plays.length > 0) plays = local.plays;
+        if(local.drills && local.drills.length > 0) drills = local.drills;
+        if(local.playFolders && local.playFolders.length > 0) playFolders = local.playFolders;
+        if(local.drillFolders && local.drillFolders.length > 0) drillFolders = local.drillFolders;
+        if(local.folders && local.folders.length > 0) folders = local.folders;
+        updatePlaysUI();
+      }catch(e){}
+    }
   }
 };
 
@@ -1066,9 +1092,30 @@ async function syncFromCloud(){
         drills = [...data.drills, ...localDrillsOnly];
       }
       updatePlaysUI();
+      // ローカルにもバックアップ
+      if(window._idbSave) window._idbSave({plays, drills, playFolders, drillFolders, folders}).catch(()=>{});
       showSyncBadge('☁️ クラウドから読み込みました');
     }
-  } catch(e){ console.error('sync error',e); }
+  } catch(e){
+    console.error('sync error',e);
+    // クラウド読み込み失敗 → IndexedDBからフォールバック
+    if(window._idbLoad){
+      try{
+        const local = await window._idbLoad();
+        const hasLocal = (local.plays && local.plays.length > 0) ||
+                         (local.drills && local.drills.length > 0);
+        if(hasLocal){
+          if(local.plays && local.plays.length > 0) plays = local.plays;
+          if(local.drills && local.drills.length > 0) drills = local.drills;
+          if(local.playFolders && local.playFolders.length > 0) playFolders = local.playFolders;
+          if(local.drillFolders && local.drillFolders.length > 0) drillFolders = local.drillFolders;
+          if(local.folders && local.folders.length > 0) folders = local.folders;
+          updatePlaysUI();
+          showSyncBadge('📴 オフライン — ローカルデータを復元');
+        }
+      }catch(e2){ console.error('IDB fallback error:', e2); }
+    }
+  }
 }
 
 async function syncToCloud(){
