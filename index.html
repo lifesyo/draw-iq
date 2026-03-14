@@ -4,7 +4,117 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Draw IQ">
+<meta name="theme-color" content="#0d1117">
+<link rel="manifest" id="manifest-link">
+<link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'><rect fill='%230d1117' width='180' height='180' rx='36'/><text x='90' y='125' font-size='100' text-anchor='middle' fill='%2300e68a'>🏀</text></svg>">
 <title>Draw IQ - Basketball Strategy Board</title>
+<script>
+// ── PWA: インラインマニフェスト生成 ──
+(function(){
+  const manifest = {
+    name: 'Draw IQ - Basketball Strategy Board',
+    short_name: 'Draw IQ',
+    start_url: './',
+    display: 'standalone',
+    orientation: 'any',
+    background_color: '#0d1117',
+    theme_color: '#0d1117',
+    icons: [{
+      src: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect fill="%230d1117" width="512" height="512" rx="96"/><text x="256" y="350" font-size="280" text-anchor="middle" fill="%2300e68a">🏀</text></svg>',
+      sizes: '512x512', type: 'image/svg+xml', purpose: 'any maskable'
+    }]
+  };
+  const blob = new Blob([JSON.stringify(manifest)], {type:'application/json'});
+  document.getElementById('manifest-link').href = URL.createObjectURL(blob);
+})();
+
+// ── Service Worker: オフライン対応 ──
+if('serviceWorker' in navigator){
+  // SW本体をBlobで生成・登録
+  const swCode = `
+    const CACHE_NAME = 'draw-iq-v3';
+    const PRECACHE = [
+      './',
+      './index.html'
+    ];
+    const CDN_PATTERNS = [
+      'fonts.googleapis.com',
+      'fonts.gstatic.com',
+      'cdnjs.cloudflare.com',
+      'www.gstatic.com/firebasejs'
+    ];
+
+    self.addEventListener('install', e => {
+      e.waitUntil(
+        caches.open(CACHE_NAME).then(c => c.addAll(PRECACHE)).then(() => self.skipWaiting())
+      );
+    });
+
+    self.addEventListener('activate', e => {
+      e.waitUntil(
+        caches.keys().then(keys =>
+          Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)))
+        ).then(() => self.clients.claim())
+      );
+    });
+
+    self.addEventListener('fetch', e => {
+      const url = new URL(e.request.url);
+
+      // API・Firestore系はネットワーク優先（オフラインならスキップ）
+      if(url.pathname.startsWith('/api/') ||
+         url.hostname.includes('firestore.googleapis.com') ||
+         url.hostname.includes('identitytoolkit.googleapis.com') ||
+         url.hostname.includes('securetoken.googleapis.com')){
+        e.respondWith(fetch(e.request).catch(() => new Response('{}', {status:503, headers:{'Content-Type':'application/json'}})));
+        return;
+      }
+
+      // CDNリソース: Cache-First（フォント・ライブラリ等）
+      const isCDN = CDN_PATTERNS.some(p => url.hostname.includes(p));
+      if(isCDN){
+        e.respondWith(
+          caches.match(e.request).then(cached => {
+            if(cached) return cached;
+            return fetch(e.request).then(resp => {
+              if(resp.ok){
+                const clone = resp.clone();
+                caches.open(CACHE_NAME).then(c => c.put(e.request, clone));
+              }
+              return resp;
+            }).catch(() => new Response('', {status:503}));
+          })
+        );
+        return;
+      }
+
+      // それ以外: Network-First → Cache fallback
+      e.respondWith(
+        fetch(e.request).then(resp => {
+          if(resp.ok && e.request.method === 'GET'){
+            const clone = resp.clone();
+            caches.open(CACHE_NAME).then(c => c.put(e.request, clone));
+          }
+          return resp;
+        }).catch(() => caches.match(e.request).then(c => c || caches.match('./')))
+      );
+    });
+  `;
+  const swBlob = new Blob([swCode], {type:'application/javascript'});
+  const swUrl = URL.createObjectURL(swBlob);
+  // Blob URLのSWは同一オリジンスコープに限定されるため、
+  // 外部ファイルとして登録可能な場合はそちらを優先
+  // Vercelデプロイ時はsw.jsファイルとして切り出すのがベスト
+  // まずは外部sw.jsを試み、なければBlob fallback
+  navigator.serviceWorker.register('./sw.js').catch(() => {
+    // sw.jsが存在しない場合、Blob SWは登録スコープが限定的だが
+    // index.htmlと同じページ内では動作する
+    navigator.serviceWorker.register(swUrl, {scope:'./'}).catch(()=>{});
+  });
+}
+</script>
 <!-- Firebase -->
 <script type="module" id="fb-init">
 // ★ ここにFirebaseの設定を貼り付けてください ★
@@ -94,6 +204,85 @@ if (FIREBASE_CONFIG) {
   window._fbLoadData = async () => ({folders:[], playFolders:[], drillFolders:[], plays:[]});
   window._fbDeletePlay = async () => {};
 }
+</script>
+<script>
+// ── IndexedDB オフラインストレージ ──
+// Firebase接続不可時でもプレーをローカル保存
+(function(){
+  const DB_NAME = 'draw-iq-offline';
+  const DB_VER = 1;
+  let _db = null;
+
+  function openDB(){
+    return new Promise((res, rej) => {
+      if(_db){ res(_db); return; }
+      const req = indexedDB.open(DB_NAME, DB_VER);
+      req.onupgradeneeded = e => {
+        const db = e.target.result;
+        if(!db.objectStoreNames.contains('data')){
+          db.createObjectStore('data', {keyPath:'key'});
+        }
+      };
+      req.onsuccess = e => { _db = e.target.result; res(_db); };
+      req.onerror = () => rej(req.error);
+    });
+  }
+
+  async function idbGet(key){
+    const db = await openDB();
+    return new Promise((res, rej) => {
+      const tx = db.transaction('data','readonly');
+      const req = tx.objectStore('data').get(key);
+      req.onsuccess = () => res(req.result ? req.result.value : null);
+      req.onerror = () => rej(req.error);
+    });
+  }
+
+  async function idbSet(key, value){
+    const db = await openDB();
+    return new Promise((res, rej) => {
+      const tx = db.transaction('data','readwrite');
+      tx.objectStore('data').put({key, value});
+      tx.oncomplete = () => res();
+      tx.onerror = () => rej(tx.error);
+    });
+  }
+
+  // グローバルに公開
+  window._idbSave = async function(data){
+    try{ await idbSet('plays', data.plays || []);
+         await idbSet('drills', data.drills || []);
+         await idbSet('playFolders', data.playFolders || []);
+         await idbSet('drillFolders', data.drillFolders || []);
+         await idbSet('folders', data.folders || []);
+    }catch(e){ console.error('IDB save error:', e); }
+  };
+
+  window._idbLoad = async function(){
+    try{
+      const plays = await idbGet('plays') || [];
+      const drills = await idbGet('drills') || [];
+      const playFolders = await idbGet('playFolders') || [];
+      const drillFolders = await idbGet('drillFolders') || [];
+      const folders = await idbGet('folders') || [];
+      return {plays, drills, playFolders, drillFolders, folders};
+    }catch(e){ console.error('IDB load error:', e); return {plays:[],drills:[],playFolders:[],drillFolders:[],folders:[]}; }
+  };
+
+  // オンライン/オフラインイベント
+  window.addEventListener('online', () => {
+    const b = document.getElementById('sync-badge');
+    if(b){ b.textContent = '🌐 オンラインに復帰'; b.style.display='block';
+      clearTimeout(b._t); b._t = setTimeout(()=>b.style.display='none', 2500); }
+    // オンライン復帰時にクラウド同期を試行
+    if(window.currentUser && typeof window.syncToCloud === 'function') window.syncToCloud();
+  });
+  window.addEventListener('offline', () => {
+    const b = document.getElementById('sync-badge');
+    if(b){ b.textContent = '📴 オフラインモード'; b.style.display='block';
+      clearTimeout(b._t); b._t = setTimeout(()=>b.style.display='none', 3000); }
+  });
+})();
 </script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Noto+Sans+JP:wght@400;500;700&display=swap');
@@ -883,11 +1072,20 @@ async function syncFromCloud(){
 }
 
 async function syncToCloud(){
+  // 常にIndexedDBにローカル保存（オフライン対応）
+  if(window._idbSave){
+    try{ await window._idbSave({plays, drills, playFolders, drillFolders, folders}); }
+    catch(e){ console.error('IDB backup error:', e); }
+  }
   if(!currentUser) return;
+  if(!navigator.onLine){
+    showSyncBadge('📴 オフライン — ローカル保存済み');
+    return;
+  }
   try{
     await window._fbSaveData(currentUser.uid, {plays, folders, drills, playFolders, drillFolders});
     showSyncBadge('☁️ 同期しました');
-  } catch(e){ console.error('save error',e); showSyncBadge('⚠️ 同期エラー'); }
+  } catch(e){ console.error('save error',e); showSyncBadge('⚠️ 同期エラー（ローカル保存済み）'); }
 }
 
 function showSyncBadge(msg){
@@ -1963,9 +2161,10 @@ function render(fromF=null, toF=null, moveT=0, arrowT=null, steps=null) {
           drawArrow(s.arrow, alpha, prog);
         }
       });
-      // 赤色（選択肢）矢印
-      const arrowEase = _easeF(arrowT);
-      drawAllArrows(fromOption, Math.max(0, 1 - arrowEase * 0.8));
+      // 赤色（選択肢）矢印 — 全フェーズで十分に表示
+      // 矢印表示フェーズ(moveT=0)では完全に表示、移動フェーズでもしっかり表示
+      const optionAlpha = steps.some(s => s.t > 0) ? 0.55 : 0.75;
+      drawAllArrows(fromOption, optionAlpha);
 
       // --- 軌跡 ---
       if(document.getElementById('show-trails').checked){
@@ -2210,7 +2409,7 @@ function render(fromF=null, toF=null, moveT=0, arrowT=null, steps=null) {
       drawAllArrows(fromPass, Math.max(0,1-arrowEase*3));
       drawAllArrows(fromHandoff, Math.max(0.3, 1-arrowEase*0.5));
       drawAllArrows(fromShot, Math.max(0,1-arrowEase*2));
-      drawAllArrows(fromOption, Math.max(0,1-arrowEase*0.8));
+      drawAllArrows(fromOption, Math.max(0.45, 1-arrowEase*0.5));
       if(document.getElementById('show-trails').checked){
         fromF.players.forEach(fp=>{
           const entry=pam[fp.id]; if(!entry||entry.isPass) return;
@@ -2375,7 +2574,7 @@ canvas.addEventListener('pointerdown', e=>{
     // handoff: スタンプ式（タップ位置に配置）
     saveUndo();
     const stamp = {
-      pts:[{x,y},{x:x+1,y:y+1}], color:'#111111', thick:3,
+      pts:[{x,y},{x:x+1,y:y+1}], color:drawColor, thick:3,
       atype:'handoff', style:'handoff'
     };
     arrows.push(stamp);
@@ -4772,6 +4971,34 @@ if(window.innerWidth<600){
 }
 newPlay();
 resize();
+
+// ── オフラインデータ読み込み（非ログイン時） ──
+(async function(){
+  if(window._idbLoad){
+    try{
+      const local = await window._idbLoad();
+      const hasLocal = (local.plays && local.plays.length > 0) ||
+                       (local.drills && local.drills.length > 0);
+      if(hasLocal && !currentUser){
+        // ログイン前でもローカルデータを復元
+        if(local.plays && local.plays.length > 0){
+          const localIds = new Set(local.plays.map(p=>p.id));
+          const existing = plays.filter(p=>!localIds.has(p.id));
+          plays = [...local.plays, ...existing];
+        }
+        if(local.drills && local.drills.length > 0){
+          const localDrillIds = new Set(local.drills.map(d=>d.id));
+          const existingDrills = drills.filter(d=>!localDrillIds.has(d.id));
+          drills = [...local.drills, ...existingDrills];
+        }
+        if(local.playFolders && local.playFolders.length > 0) playFolders = local.playFolders;
+        if(local.drillFolders && local.drillFolders.length > 0) drillFolders = local.drillFolders;
+        if(local.folders && local.folders.length > 0) folders = local.folders;
+        updatePlaysUI();
+      }
+    }catch(e){ console.error('IDB initial load error:', e); }
+  }
+})();
 </script>
 <!-- Upgrade Modal -->
 <div id="upgrade-modal" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.7);backdrop-filter:blur(4px);display:none;align-items:center;justify-content:center;padding:16px">

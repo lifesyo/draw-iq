@@ -1,85 +1,67 @@
-// Draw IQ Service Worker
-const CACHE_NAME = 'draw-iq-v1';
-const ASSETS = [
+const CACHE_NAME = 'draw-iq-v3';
+const PRECACHE = [
   './',
-  './index.html',
-  './manifest.json',
-  'https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Noto+Sans+JP:wght@400;500;700&display=swap'
+  './index.html'
+];
+const CDN_PATTERNS = [
+  'fonts.googleapis.com',
+  'fonts.gstatic.com',
+  'cdnjs.cloudflare.com',
+  'www.gstatic.com/firebasejs'
 ];
 
-// インストール: コアアセットをキャッシュ
-self.addEventListener('install', event => {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then(cache => {
-      return cache.addAll(ASSETS);
-    }).then(() => self.skipWaiting())
+self.addEventListener('install', e => {
+  e.waitUntil(
+    caches.open(CACHE_NAME).then(c => c.addAll(PRECACHE)).then(() => self.skipWaiting())
   );
 });
 
-// アクティベート: 古いキャッシュを削除
-self.addEventListener('activate', event => {
-  event.waitUntil(
+self.addEventListener('activate', e => {
+  e.waitUntil(
     caches.keys().then(keys =>
-      Promise.all(
-        keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k))
-      )
+      Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)))
     ).then(() => self.clients.claim())
   );
 });
 
-// フェッチ: キャッシュファースト → ネットワークフォールバック
-// Firebase等のAPIリクエストはネットワークファースト
-self.addEventListener('fetch', event => {
-  const url = new URL(event.request.url);
+self.addEventListener('fetch', e => {
+  const url = new URL(e.request.url);
 
-  // Firebase / Google API はネットワークファースト（キャッシュしない）
-  if (url.hostname.includes('firebaseio.com') ||
-      url.hostname.includes('googleapis.com') ||
-      url.hostname.includes('firestore.googleapis.com') ||
-      url.hostname.includes('identitytoolkit.googleapis.com') ||
-      url.hostname.includes('securetoken.googleapis.com') ||
-      url.hostname.includes('gstatic.com/firebasejs')) {
-    event.respondWith(
-      fetch(event.request).catch(() => caches.match(event.request))
+  // API・Firestore系はネットワーク優先（オフラインならスキップ）
+  if(url.pathname.startsWith('/api/') ||
+     url.hostname.includes('firestore.googleapis.com') ||
+     url.hostname.includes('identitytoolkit.googleapis.com') ||
+     url.hostname.includes('securetoken.googleapis.com')){
+    e.respondWith(fetch(e.request).catch(() => new Response('{}', {status:503, headers:{'Content-Type':'application/json'}})));
+    return;
+  }
+
+  // CDNリソース: Cache-First（フォント・ライブラリ等）
+  const isCDN = CDN_PATTERNS.some(p => url.hostname.includes(p));
+  if(isCDN){
+    e.respondWith(
+      caches.match(e.request).then(cached => {
+        if(cached) return cached;
+        return fetch(e.request).then(resp => {
+          if(resp.ok){
+            const clone = resp.clone();
+            caches.open(CACHE_NAME).then(c => c.put(e.request, clone));
+          }
+          return resp;
+        }).catch(() => new Response('', {status:503}));
+      })
     );
     return;
   }
 
-  // その他のアセットはキャッシュファースト
-  event.respondWith(
-    caches.match(event.request).then(cached => {
-      if (cached) {
-        // バックグラウンドで更新
-        fetch(event.request).then(response => {
-          if (response && response.status === 200) {
-            caches.open(CACHE_NAME).then(cache => {
-              cache.put(event.request, response);
-            });
-          }
-        }).catch(() => {});
-        return cached;
+  // それ以外: Network-First → Cache fallback
+  e.respondWith(
+    fetch(e.request).then(resp => {
+      if(resp.ok && e.request.method === 'GET'){
+        const clone = resp.clone();
+        caches.open(CACHE_NAME).then(c => c.put(e.request, clone));
       }
-      return fetch(event.request).then(response => {
-        if (response && response.status === 200 && response.type === 'basic') {
-          const clone = response.clone();
-          caches.open(CACHE_NAME).then(cache => {
-            cache.put(event.request, clone);
-          });
-        }
-        return response;
-      }).catch(() => {
-        // オフラインフォールバック
-        if (event.request.destination === 'document') {
-          return caches.match('./index.html');
-        }
-      });
-    })
+      return resp;
+    }).catch(() => caches.match(e.request).then(c => c || caches.match('./')))
   );
-});
-
-// オフライン同期キュー: ネット復帰時にFirebase同期を実行
-self.addEventListener('message', event => {
-  if (event.data && event.data.type === 'SKIP_WAITING') {
-    self.skipWaiting();
-  }
 });
