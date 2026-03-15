@@ -2209,14 +2209,6 @@ function render(fromF=null, toF=null, moveT=0, arrowT=null, steps=null) {
         }
       });
       // 赤色（選択肢）矢印 — 全フェーズで十分に表示
-      // 矢印表示フェーズ(moveT=0)では完全に表示、移動フェーズでもしっかり表示
-      // ── デバッグ: 再生開始直後1回だけ画面にデバッグ情報を表示 ──
-      if(!window._diqDebugShown){
-        window._diqDebugShown = true;
-        const info = fromF.arrows.map(a => a.atype + ':' + (a.color||'なし')).join(' / ');
-        const msg = '全矢印=' + fromF.arrows.length + ' 赤=' + fromOption.length + ' 黒=' + fromActive.length + '\n' + info;
-        setTimeout(()=>{ alert('[デバッグ]\n' + msg); window._diqDebugShown = false; }, 200);
-      }
       const optionAlpha = steps.some(s => s.t > 0) ? 0.55 : 0.75;
       drawAllArrows(fromOption, optionAlpha);
 
@@ -2710,8 +2702,6 @@ canvas.addEventListener('pointerup', e=>{
           smoothed._screenAngle = rawAng;
         }
         const arrow = {pts:smoothed,atype:actionType,color:drawColor};
-        // デバッグ: 矢印保存時の色を確認
-        document.title = 'Draw IQ [保存色:' + drawColor + ']';
         if(smoothed._screenAngle !== undefined) arrow._screenAngle = smoothed._screenAngle;
         // 始点→終点の全体方向を保存（矢印の向きに使用）
         if(freehandPoints.length>=2){
@@ -2789,8 +2779,6 @@ function setColor(el){
   drawColor=el.dataset.color;
   document.querySelectorAll('.cswatch').forEach(d=>d.classList.remove('active'));
   el.classList.add('active');
-  // デバッグ: 色が切り替わったか確認
-  document.title = 'Draw IQ [色:' + drawColor + ']';
 }
 
 // ═══════════════════════════════════════
@@ -3523,17 +3511,6 @@ function buildPlayerArrowMap(f){
 }
 
 function animTrans(fromF,toF,dur,onDone){
-  // デバッグ: 再生時にfromFの矢印データを確認
-  if(!window._diqAnimDebugShown){
-    window._diqAnimDebugShown = true;
-    const isBlackDbg = a => (!a.color || a.color === '#111111' || a.color === '#111');
-    const optDbg = (fromF.arrows||[]).filter(a => !isBlackDbg(a));
-    const actDbg = (fromF.arrows||[]).filter(a => isBlackDbg(a));
-    alert('[animTrans デバッグ]\nfromF.arrows数: ' + (fromF.arrows||[]).length
-      + '\n赤: ' + optDbg.length + ' 黒: ' + actDbg.length
-      + '\n詳細:\n' + (fromF.arrows||[]).map(a => a.atype + ' color=' + JSON.stringify(a.color)).join('\n'));
-    setTimeout(()=>{ window._diqAnimDebugShown = false; }, 3000);
-  }
   // 矢印を1人ずつ順番に表示 → 全員同時に移動
   if(!fromF.playerArrowMap || Object.keys(fromF.playerArrowMap).length === 0){
     fromF.playerArrowMap = buildPlayerArrowMap(fromF);
@@ -3570,10 +3547,36 @@ function animTrans(fromF,toF,dur,onDone){
   });
 
   if(sorted.length === 0){
-    if(fromF.resultPlayers) players = cloneP(fromF.resultPlayers);
-    else players = cloneP(toF.players);
-    arrows = [];
-    render(); onDone(); return;
+    // 黒矢印がない場合でも、赤矢印（選択肢）があれば表示アニメーションを実行
+    const _isBlkC = a => (!a.color || a.color === '#111111' || a.color === '#111');
+    const hasOptArr = (fromF.arrows||[]).some(a => !_isBlkC(a));
+    if(!hasOptArr){
+      if(fromF.resultPlayers) players = cloneP(fromF.resultPlayers);
+      else players = cloneP(toF.players);
+      arrows = [];
+      render(); onDone(); return;
+    }
+    // 赤矢印のみ: 表示→移動のアニメーション
+    const optShowDur = 1200;
+    const totalDur2 = optShowDur + dur;
+    const st2 = performance.now();
+    _pausedElapsed = 0;
+    function tickOpt(now){
+      if(!isPlaying){ _pausedElapsed = now - st2; return; }
+      const el2 = now - st2;
+      _pausedElapsed = el2;
+      const mt2 = el2 >= optShowDur ? Math.min(1, (el2 - optShowDur) / dur) : 0;
+      const ot2 = Math.min(1, el2 / totalDur2);
+      render(fromF, toF, mt2, ot2, []);
+      if(el2 < totalDur2){ animTimer=requestAnimationFrame(tickOpt); return; }
+      if(fromF.resultPlayers) players = cloneP(fromF.resultPlayers);
+      else players = cloneP(toF.players);
+      arrows = [];
+      _pausedElapsed = 0; _pausedFromF = null; _pausedToF = null;
+      render(); onDone();
+    }
+    animTimer=requestAnimationFrame(tickOpt);
+    return;
   }
 
   // タイムライン: 矢印を1人ずつ表示 → 全員同時に移動
@@ -3652,10 +3655,32 @@ function resumeAnimTrans(fromF,toF,dur,resumeFrom,onDone){
     sorted.push(['_orphan_' + Math.random(), {arrow: a, isPass}]);
   });
   if(sorted.length === 0){
-    if(fromF.resultPlayers) players = cloneP(fromF.resultPlayers);
-    else players = cloneP(toF.players);
-    arrows = [];
-    render(); onDone(); return;
+    const _isBlkR = a => (!a.color || a.color === '#111111' || a.color === '#111');
+    const hasOptR = (fromF.arrows||[]).some(a => !_isBlkR(a));
+    if(!hasOptR){
+      if(fromF.resultPlayers) players = cloneP(fromF.resultPlayers);
+      else players = cloneP(toF.players);
+      arrows = [];
+      render(); onDone(); return;
+    }
+    const optSD = 1200;
+    const totD = optSD + dur;
+    const stR = performance.now() - resumeFrom;
+    function tickOptR(now){
+      if(!isPlaying){ _pausedElapsed = now - stR; return; }
+      const elR = now - stR;
+      _pausedElapsed = elR;
+      const mtR = elR >= optSD ? Math.min(1, (elR - optSD) / dur) : 0;
+      const otR = Math.min(1, elR / totD);
+      render(fromF, toF, mtR, otR, []);
+      if(elR < totD){ animTimer=requestAnimationFrame(tickOptR); return; }
+      if(fromF.resultPlayers) players = cloneP(fromF.resultPlayers);
+      else players = cloneP(toF.players);
+      arrows = [];
+      render(); onDone();
+    }
+    animTimer=requestAnimationFrame(tickOptR);
+    return;
   }
   const ARROW_EACH = 700;
   const PAUSE = 300;
