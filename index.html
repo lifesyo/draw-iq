@@ -161,7 +161,11 @@ if (FIREBASE_CONFIG) {
     await setDoc(doc(db,'users',uid,'meta','folders'), {
       folders: data.folders || [],
       playFolders: data.playFolders || [],
-      drillFolders: data.drillFolders || []
+      drillFolders: data.drillFolders || [],
+      playFoldersHalf: data.playFoldersHalf || [],
+      playFoldersFull: data.playFoldersFull || [],
+      drillFoldersHalf: data.drillFoldersHalf || [],
+      drillFoldersFull: data.drillFoldersFull || []
     });
     function stripThumbs(play){
       const p = {...play};
@@ -188,6 +192,10 @@ if (FIREBASE_CONFIG) {
     const folders = meta.folders || [];
     const pf = meta.playFolders || [];
     const df = meta.drillFolders || [];
+    const pfh = meta.playFoldersHalf || [];
+    const pff = meta.playFoldersFull || [];
+    const dfh = meta.drillFoldersHalf || [];
+    const dff = meta.drillFoldersFull || [];
     const playsSnap = await getDocs(collection(db,'users',uid,'plays'));
     const plays = [];
     playsSnap.forEach(d => plays.push(d.data()));
@@ -195,7 +203,10 @@ if (FIREBASE_CONFIG) {
     try { const drillsSnap = await getDocs(collection(db,'users',uid,'drills'));
       drillsSnap.forEach(d => drillsList.push(d.data()));
     } catch(e){}
-    return {folders, playFolders: pf, drillFolders: df, plays, drills: drillsList};
+    return {folders, playFolders: pf, drillFolders: df,
+      playFoldersHalf: pfh, playFoldersFull: pff,
+      drillFoldersHalf: dfh, drillFoldersFull: dff,
+      plays, drills: drillsList};
   };
 
   window._fbDeletePlay = async (uid, playId) => {
@@ -266,6 +277,10 @@ if (FIREBASE_CONFIG) {
          await idbSet('playFolders', data.playFolders || []);
          await idbSet('drillFolders', data.drillFolders || []);
          await idbSet('folders', data.folders || []);
+         await idbSet('playFoldersHalf', data.playFoldersHalf || []);
+         await idbSet('playFoldersFull', data.playFoldersFull || []);
+         await idbSet('drillFoldersHalf', data.drillFoldersHalf || []);
+         await idbSet('drillFoldersFull', data.drillFoldersFull || []);
     }catch(e){ console.error('IDB save error:', e); }
   };
 
@@ -276,8 +291,13 @@ if (FIREBASE_CONFIG) {
       const playFolders = await idbGet('playFolders') || [];
       const drillFolders = await idbGet('drillFolders') || [];
       const folders = await idbGet('folders') || [];
-      return {plays, drills, playFolders, drillFolders, folders};
-    }catch(e){ console.error('IDB load error:', e); return {plays:[],drills:[],playFolders:[],drillFolders:[],folders:[]}; }
+      const playFoldersHalf = await idbGet('playFoldersHalf') || [];
+      const playFoldersFull = await idbGet('playFoldersFull') || [];
+      const drillFoldersHalf = await idbGet('drillFoldersHalf') || [];
+      const drillFoldersFull = await idbGet('drillFoldersFull') || [];
+      return {plays, drills, playFolders, drillFolders, folders,
+        playFoldersHalf, playFoldersFull, drillFoldersHalf, drillFoldersFull};
+    }catch(e){ console.error('IDB load error:', e); return {plays:[],drills:[],playFolders:[],drillFolders:[],folders:[],playFoldersHalf:[],playFoldersFull:[],drillFoldersHalf:[],drillFoldersFull:[]}; }
   };
 
   // オンライン/オフラインイベント
@@ -524,14 +544,12 @@ body{font-family:'Noto Sans JP',sans-serif;background:var(--bg);color:var(--text
 .sep{width:1px;background:var(--border);height:26px;flex-shrink:0;}
 .fs{display:flex;gap:5px;overflow-x:auto;flex:1;padding:1px 0;}
 .ft{width:50px;height:36px;border-radius:4px;border:2px solid var(--border);
-  cursor:pointer;flex-shrink:0;object-fit:cover;touch-action:manipulation;
-  transition:transform .15s,opacity .15s;}
+  cursor:pointer;flex-shrink:0;object-fit:cover;touch-action:none;
+  transition:transform .15s,opacity .15s;user-select:none;-webkit-user-select:none;}
 .ft.cur{border-color:var(--accent);}
-.ft.dragging{opacity:0.4;transform:scale(0.85);}
-.ft.drag-over-left{border-left:3px solid var(--accent) !important;}
-.ft.drag-over-right{border-right:3px solid var(--accent) !important;}
-.ft-num{position:absolute;bottom:1px;right:2px;font-size:8px;color:rgba(255,255,255,.7);
-  background:rgba(0,0,0,.5);padding:0 3px;border-radius:2px;pointer-events:none;}
+.ft.dragging{opacity:0.3;transform:scale(0.85);}
+.ft.drag-over-left{border-left:3px solid var(--accent) !important;margin-left:8px;transition:margin .1s;}
+.ft.drag-over-right{border-right:3px solid var(--accent) !important;margin-right:8px;transition:margin .1s;}
 .fi{font-size:11px;color:var(--text-dim);white-space:nowrap;}
 
 /* MODAL */
@@ -977,8 +995,21 @@ let tool = 'select', actionType = 'cut', drawColor = '#111111';
 let showSubs = false;
 let players = [], arrows = [], frames = [], plays = [], folders = [], miscs = [];
 let playFolders = [], drillFolders = [];
-function currentFolders(){ return _isDrillTab() ? drillFolders : playFolders; }
-function setCurrentFolders(v){ if(_isDrillTab()) drillFolders = v; else playFolders = v; }
+let playFoldersHalf = [], playFoldersFull = [], drillFoldersHalf = [], drillFoldersFull = [];
+function currentFolders(){
+  if(_playsTab === 'plays-half') return playFoldersHalf;
+  if(_playsTab === 'plays-full') return playFoldersFull;
+  if(_playsTab === 'drills-half') return drillFoldersHalf;
+  if(_playsTab === 'drills-full') return drillFoldersFull;
+  return playFoldersHalf;
+}
+function setCurrentFolders(v){
+  if(_playsTab === 'plays-half') playFoldersHalf = v;
+  else if(_playsTab === 'plays-full') playFoldersFull = v;
+  else if(_playsTab === 'drills-half') drillFoldersHalf = v;
+  else if(_playsTab === 'drills-full') drillFoldersFull = v;
+}
+function allFolders(){ return {playFoldersHalf, playFoldersFull, drillFoldersHalf, drillFoldersFull, playFolders, drillFolders}; }
 
 
 let currentUser = null; // Firebase user object
@@ -1098,6 +1129,12 @@ window.onFbAuthChange = async function(user){
         if(local.playFolders && local.playFolders.length > 0) playFolders = local.playFolders;
         if(local.drillFolders && local.drillFolders.length > 0) drillFolders = local.drillFolders;
         if(local.folders && local.folders.length > 0) folders = local.folders;
+        if(local.playFoldersHalf && local.playFoldersHalf.length > 0) playFoldersHalf = local.playFoldersHalf;
+        if(local.playFoldersFull && local.playFoldersFull.length > 0) playFoldersFull = local.playFoldersFull;
+        if(local.drillFoldersHalf && local.drillFoldersHalf.length > 0) drillFoldersHalf = local.drillFoldersHalf;
+        if(local.drillFoldersFull && local.drillFoldersFull.length > 0) drillFoldersFull = local.drillFoldersFull;
+        if(playFoldersHalf.length===0 && playFolders.length>0) playFoldersHalf = playFolders;
+        if(drillFoldersHalf.length===0 && drillFolders.length>0) drillFoldersHalf = drillFolders;
         updatePlaysUI();
       }catch(e){}
     }
@@ -1129,16 +1166,22 @@ async function syncFromCloud(){
         const localOnly = plays.filter(p=>!cloudIds.has(p.id));
         plays = [...data.plays, ...localOnly];
       }
-      // フォルダ: 旧形式(folders)からの移行 + 新形式
-      if(data.playFolders && data.playFolders.length > 0){
-        playFolders = data.playFolders;
-      } else if(data.folders && data.folders.length > 0){
-        playFolders = data.folders; // 旧形式からの移行
+      // フォルダ: 旧形式(playFolders/drillFolders)からの移行 + 新4分割形式
+      if(data.playFoldersHalf && data.playFoldersHalf.length > 0) playFoldersHalf = data.playFoldersHalf;
+      if(data.playFoldersFull && data.playFoldersFull.length > 0) playFoldersFull = data.playFoldersFull;
+      if(data.drillFoldersHalf && data.drillFoldersHalf.length > 0) drillFoldersHalf = data.drillFoldersHalf;
+      if(data.drillFoldersFull && data.drillFoldersFull.length > 0) drillFoldersFull = data.drillFoldersFull;
+      // 旧形式からの移行: playFolders → playFoldersHalf
+      if(playFoldersHalf.length === 0){
+        if(data.playFolders && data.playFolders.length > 0) playFoldersHalf = data.playFolders;
+        else if(data.folders && data.folders.length > 0) playFoldersHalf = data.folders;
       }
-      if(data.drillFolders && data.drillFolders.length > 0){
-        drillFolders = data.drillFolders;
+      if(drillFoldersHalf.length === 0 && data.drillFolders && data.drillFolders.length > 0){
+        drillFoldersHalf = data.drillFolders;
       }
-      folders = playFolders; // 後方互換
+      // 後方互換
+      playFolders = playFoldersHalf; drillFolders = drillFoldersHalf;
+      folders = playFolders;
       if(data.drills) {
         const cloudDrillIds = new Set(data.drills.map(d=>d.id));
         const localDrillsOnly = drills.filter(d=>!cloudDrillIds.has(d.id));
@@ -1146,7 +1189,8 @@ async function syncFromCloud(){
       }
       updatePlaysUI();
       // ローカルにもバックアップ
-      if(window._idbSave) window._idbSave({plays, drills, playFolders, drillFolders, folders}).catch(()=>{});
+      if(window._idbSave) window._idbSave({plays, drills, playFolders, drillFolders, folders,
+        playFoldersHalf, playFoldersFull, drillFoldersHalf, drillFoldersFull}).catch(()=>{});
       showSyncBadge('☁️ クラウドから読み込みました');
     }
   } catch(e){
@@ -1163,6 +1207,13 @@ async function syncFromCloud(){
           if(local.playFolders && local.playFolders.length > 0) playFolders = local.playFolders;
           if(local.drillFolders && local.drillFolders.length > 0) drillFolders = local.drillFolders;
           if(local.folders && local.folders.length > 0) folders = local.folders;
+          if(local.playFoldersHalf && local.playFoldersHalf.length > 0) playFoldersHalf = local.playFoldersHalf;
+          if(local.playFoldersFull && local.playFoldersFull.length > 0) playFoldersFull = local.playFoldersFull;
+          if(local.drillFoldersHalf && local.drillFoldersHalf.length > 0) drillFoldersHalf = local.drillFoldersHalf;
+          if(local.drillFoldersFull && local.drillFoldersFull.length > 0) drillFoldersFull = local.drillFoldersFull;
+          // 旧形式マイグレーション
+          if(playFoldersHalf.length===0 && playFolders.length>0) playFoldersHalf = playFolders;
+          if(drillFoldersHalf.length===0 && drillFolders.length>0) drillFoldersHalf = drillFolders;
           updatePlaysUI();
           showSyncBadge('📴 オフライン — ローカルデータを復元');
         }
@@ -1174,7 +1225,8 @@ async function syncFromCloud(){
 async function syncToCloud(){
   // 常にIndexedDBにローカル保存（オフライン対応）
   if(window._idbSave){
-    try{ await window._idbSave({plays, drills, playFolders, drillFolders, folders}); }
+    try{ await window._idbSave({plays, drills, playFolders, drillFolders, folders,
+      playFoldersHalf, playFoldersFull, drillFoldersHalf, drillFoldersFull}); }
     catch(e){ console.error('IDB backup error:', e); }
   }
   if(!currentUser) return;
@@ -1183,7 +1235,8 @@ async function syncToCloud(){
     return;
   }
   try{
-    await window._fbSaveData(currentUser.uid, {plays, folders, drills, playFolders, drillFolders});
+    await window._fbSaveData(currentUser.uid, {plays, folders, drills, playFolders, drillFolders,
+      playFoldersHalf, playFoldersFull, drillFoldersHalf, drillFoldersFull});
     showSyncBadge('☁️ 同期しました');
   } catch(e){ console.error('save error',e); showSyncBadge('⚠️ 同期エラー（ローカル保存済み）'); }
 }
@@ -3158,13 +3211,13 @@ function updateFrameUI(){
       try { regenerateFrameThumb(f); } catch(e){}
     }
     const wrap = document.createElement('div');
-    wrap.style.cssText = 'position:relative;flex-shrink:0;';
+    wrap.style.cssText = 'position:relative;flex-shrink:0;touch-action:none;';
     const img=document.createElement('img');
     img.src=f.thumbnail||'';img.className='ft'+(i===currentFrame?' cur':'');
-    img.onerror=function(){ this.style.display='none'; const d=document.createElement('div'); d.className='ft'+(i===currentFrame?' cur':''); d.style.cssText='display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--text-dim);background:var(--card);'; d.textContent=(i+1); d.title='フレーム '+(i+1); d.onclick=()=>loadFrame(i); setupFrameDrag(d, i); this.parentNode.replaceChild(d,this); };
+    img.style.touchAction='none';
+    img.onerror=function(){ this.style.display='none'; const d=document.createElement('div'); d.className='ft'+(i===currentFrame?' cur':''); d.style.cssText='display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--text-dim);background:var(--card);touch-action:none;'; d.textContent=(i+1); d.title='フレーム '+(i+1); d.onclick=()=>{ if(!_frd.active) loadFrame(i); }; this.parentNode.replaceChild(d,this); };
     img.title='フレーム '+(i+1);
-    img.onclick=()=>{ if(_frameDragIdx < 0) loadFrame(i); };
-    setupFrameDrag(img, i);
+    img.onclick=()=>{ if(!_frd.active) loadFrame(i); };
     wrap.appendChild(img);
     strip.appendChild(wrap);
   });
@@ -4369,12 +4422,16 @@ async function exportFramesAsZip(spd, settings, W, courtH, oc, octx){
 const cloneFrames = src=>src.map(f=>({...f,players:cloneP(f.players),arrows:cloneA(f.arrows)}));
 
 // ── 高画質サムネイル生成（メインrender利用 → コートエリアのみクリップ） ──
-function generatePlayThumb(frameData) {
+function generatePlayThumb(frameData, playCourtMode) {
   // 状態を退避
   const savedPlayers = players, savedArrows = arrows;
   const savedScale = canvas._scale;
   const savedW = canvas.width, savedH = canvas.height;
   const savedSW = canvas.style.width, savedSH = canvas.style.height;
+  const savedCourtMode = courtMode;
+
+  // プレーのコートモードを適用
+  if(playCourtMode) courtMode = playCourtMode;
 
   // フレームの状態をロード
   players = cloneP(frameData.players);
@@ -4401,6 +4458,7 @@ function generatePlayThumb(frameData) {
   const dataUrl = oc.toDataURL('image/jpeg', 0.88);
 
   // 状態を復元
+  courtMode = savedCourtMode;
   canvas.width = savedW;
   canvas.height = savedH;
   canvas.style.width = savedSW;
@@ -4622,7 +4680,7 @@ function openPlaysScreen(){
   // Generate HD thumbs for all plays/drills
   [...plays, ...drills].forEach(p => {
     if(p.frames && p.frames.length > 0 && !p.frames[0]._hdThumb) {
-      try { p.frames[0]._hdThumb = generatePlayThumb(p.frames[0]); } catch(e) {}
+      try { p.frames[0]._hdThumb = generatePlayThumb(p.frames[0], p.courtMode || 'half'); } catch(e) {}
     }
   });
   // タブにドロップゾーン設定（プレー↔ドリル移動用）
@@ -4791,7 +4849,7 @@ function openPlayDetail(id) {
   if (play.frames && play.frames.length > 0) {
     const f0 = play.frames[0];
     if (!f0._hdThumb) {
-      try { f0._hdThumb = generatePlayThumb(f0); } catch(e) {}
+      try { f0._hdThumb = generatePlayThumb(f0, play.courtMode || 'half'); } catch(e) {}
     }
     thumbSrc = f0._hdThumb || f0.thumbnail || '';
   }
@@ -4909,92 +4967,179 @@ function renamePlay(id){
 }
 
 // ═══════════════════════════════════════
-//  FRAME REORDER (long-press drag)
+//  FRAME REORDER (long-press → slide)
 // ═══════════════════════════════════════
-let _frameDragIdx = -1;
-let _frameDragOverIdx = -1;
-let _frameLongPress = null;
+let _frd = { active:false, idx:-1, ghost:null, timer:null, sx:0, sy:0, moved:false, pid:null, lastClientX:0 };
 
-function setupFrameDrag(el, idx){
-  let pressTimer = null;
-  let startX = 0, startY = 0;
-  let moved = false;
+function initFrameReorder(){
+  // pointerdown on strip, move/up on document for reliable tracking
+  const strip = document.getElementById('frames-strip');
+  if(!strip) return;
+  strip.addEventListener('pointerdown', _frdDown, {passive:false});
+  document.addEventListener('pointermove', _frdMove, {passive:false});
+  document.addEventListener('pointerup', _frdUp);
+  document.addEventListener('pointercancel', _frdUp);
+}
 
-  el.addEventListener('pointerdown', e => {
-    startX = e.clientX; startY = e.clientY; moved = false;
-    pressTimer = setTimeout(()=>{
-      if(!moved){
-        _frameDragIdx = idx;
-        el.classList.add('dragging');
-        // Vibrate on mobile
-        if(navigator.vibrate) navigator.vibrate(30);
-      }
-    }, 400);
-  });
+function _frdGetIdx(el){
+  // Walk up from target to find direct child of frames-strip
+  const strip = document.getElementById('frames-strip');
+  if(!strip) return -1;
+  let n = el;
+  while(n){
+    if(n.parentElement === strip) return Array.prototype.indexOf.call(strip.children, n);
+    n = n.parentElement;
+  }
+  return -1;
+}
 
-  el.addEventListener('pointermove', e => {
-    if(Math.abs(e.clientX - startX) > 8 || Math.abs(e.clientY - startY) > 8){
-      moved = true;
-      if(_frameDragIdx < 0){ clearTimeout(pressTimer); return; }
+function _frdIdxAtX(cx){
+  const strip = document.getElementById('frames-strip');
+  if(!strip) return -1;
+  const ch = strip.children;
+  for(let i=0;i<ch.length;i++){
+    const r = ch[i].getBoundingClientRect();
+    if(cx >= r.left && cx <= r.right) return i;
+  }
+  if(ch.length>0){
+    if(cx > ch[ch.length-1].getBoundingClientRect().right) return ch.length-1;
+    if(cx < ch[0].getBoundingClientRect().left) return 0;
+  }
+  return -1;
+}
+
+function _frdDown(e){
+  const idx = _frdGetIdx(e.target);
+  if(idx<0) return;
+  e.preventDefault(); // prevent text selection & browser scroll
+  _frd.idx = idx;
+  _frd.sx = e.clientX;
+  _frd.sy = e.clientY;
+  _frd.moved = false;
+  _frd.pid = e.pointerId;
+  _frd.lastClientX = e.clientX;
+  clearTimeout(_frd.timer);
+  _frd.timer = setTimeout(()=>{
+    if(!_frd.moved && _frd.idx >= 0){
+      _frdStart();
     }
-    if(_frameDragIdx >= 0){
-      e.preventDefault();
-      // Find which frame we're over
-      const strip = document.getElementById('frames-strip');
-      const children = strip.children;
-      let overIdx = -1;
-      for(let i = 0; i < children.length; i++){
-        const rect = children[i].getBoundingClientRect();
-        const mx = e.clientX;
-        if(mx >= rect.left && mx <= rect.right){
-          overIdx = i;
-          // Show indicator
-          children[i].classList.remove('drag-over-left','drag-over-right');
-          if(mx < rect.left + rect.width/2){
-            children[i].classList.add('drag-over-left');
-          } else {
-            children[i].classList.add('drag-over-right');
-          }
-        } else {
-          children[i].classList.remove('drag-over-left','drag-over-right');
-        }
-      }
-      _frameDragOverIdx = overIdx;
-    }
-  });
+  }, 350);
+}
 
-  const endDrag = (e) => {
-    clearTimeout(pressTimer);
-    if(_frameDragIdx >= 0 && _frameDragOverIdx >= 0 && _frameDragIdx !== _frameDragOverIdx){
-      // Determine insert position
+function _frdStart(){
+  _frd.active = true;
+  if(navigator.vibrate) navigator.vibrate(25);
+  const strip = document.getElementById('frames-strip');
+  if(!strip) return;
+  // Disable strip scrolling during drag
+  strip.style.overflow = 'hidden';
+  // Dim source
+  const src = strip.children[_frd.idx];
+  if(src){
+    src.style.opacity = '0.25';
+    src.style.transform = 'scale(0.8)';
+  }
+  // Create ghost at last known position
+  const ghost = document.createElement('div');
+  ghost.id = 'frame-drag-ghost';
+  if(src){
+    const inner = src.querySelector('img,div');
+    if(inner){
+      const cl = inner.cloneNode(true);
+      cl.style.cssText = 'width:56px;height:40px;border-radius:6px;border:2.5px solid var(--accent);object-fit:cover;display:block;box-shadow:0 0 12px rgba(0,230,138,0.6);';
+      cl.classList.remove('cur');
+      ghost.appendChild(cl);
+    }
+  }
+  ghost.style.cssText = 'position:fixed;z-index:9999;pointer-events:none;transition:none;';
+  ghost.style.left = (_frd.lastClientX - 28) + 'px';
+  // Vertical position: align with strip
+  const stripRect = strip.getBoundingClientRect();
+  ghost.style.top = (stripRect.top - 2) + 'px';
+  document.body.appendChild(ghost);
+  _frd.ghost = ghost;
+}
+
+function _frdMove(e){
+  if(_frd.idx < 0) return;
+  _frd.lastClientX = e.clientX;
+
+  const dx = Math.abs(e.clientX - _frd.sx);
+  const dy = Math.abs(e.clientY - _frd.sy);
+  if(dx > 5 || dy > 5) _frd.moved = true;
+
+  if(!_frd.active){
+    if(_frd.moved){ clearTimeout(_frd.timer); _frd.idx = -1; }
+    return;
+  }
+
+  e.preventDefault();
+
+  // Move ghost horizontally
+  if(_frd.ghost){
+    _frd.ghost.style.left = (e.clientX - 28) + 'px';
+  }
+
+  // Highlight drop target
+  const strip = document.getElementById('frames-strip');
+  if(!strip) return;
+  const overIdx = _frdIdxAtX(e.clientX);
+  const ch = strip.children;
+  for(let i=0;i<ch.length;i++){
+    const el = ch[i].querySelector('img,div') || ch[i];
+    el.classList.remove('drag-over-left','drag-over-right');
+    if(i === overIdx && i !== _frd.idx){
+      const r = ch[i].getBoundingClientRect();
+      if(e.clientX < r.left + r.width/2) el.classList.add('drag-over-left');
+      else el.classList.add('drag-over-right');
+    }
+  }
+
+  // Auto-scroll strip
+  const sr = strip.getBoundingClientRect();
+  if(e.clientX < sr.left + 25 && strip.scrollLeft > 0) strip.scrollLeft -= 5;
+  else if(e.clientX > sr.right - 25) strip.scrollLeft += 5;
+}
+
+function _frdUp(e){
+  clearTimeout(_frd.timer);
+  const wasActive = _frd.active;
+  const fromIdx = _frd.idx;
+
+  if(wasActive && fromIdx >= 0){
+    const cx = e ? e.clientX : _frd.lastClientX;
+    const overIdx = _frdIdxAtX(cx);
+
+    if(overIdx >= 0 && overIdx !== fromIdx){
       const strip = document.getElementById('frames-strip');
-      const children = strip.children;
-      let insertBefore = _frameDragOverIdx;
-      if(_frameDragOverIdx >= 0 && _frameDragOverIdx < children.length){
-        const rect = children[_frameDragOverIdx].getBoundingClientRect();
-        if(e && e.clientX > rect.left + rect.width/2) insertBefore = _frameDragOverIdx + 1;
-      }
-      // Reorder frames array
-      const movedFrame = frames.splice(_frameDragIdx, 1)[0];
-      const newIdx = insertBefore > _frameDragIdx ? insertBefore - 1 : insertBefore;
-      frames.splice(newIdx, 0, movedFrame);
+      const r = strip.children[overIdx].getBoundingClientRect();
+      let insertAt = overIdx;
+      if(cx > r.left + r.width/2) insertAt = overIdx + 1;
+
+      const moved = frames.splice(fromIdx, 1)[0];
+      const newIdx = insertAt > fromIdx ? insertAt - 1 : insertAt;
+      frames.splice(newIdx, 0, moved);
       currentFrame = newIdx;
       loadFrame(currentFrame);
-      updateFrameUI();
     }
-    // Clean up
-    const strip = document.getElementById('frames-strip');
-    if(strip){
-      for(let c of strip.children){
-        c.classList.remove('dragging','drag-over-left','drag-over-right');
-      }
-    }
-    _frameDragIdx = -1;
-    _frameDragOverIdx = -1;
-  };
+  }
 
-  el.addEventListener('pointerup', endDrag);
-  el.addEventListener('pointercancel', endDrag);
+  // Cleanup
+  if(_frd.ghost){ _frd.ghost.remove(); _frd.ghost = null; }
+  const strip = document.getElementById('frames-strip');
+  if(strip){
+    strip.style.overflow = '';
+    for(const c of strip.children){
+      c.style.opacity = ''; c.style.transform = '';
+      const inner = c.querySelector('img,div');
+      if(inner){ inner.classList.remove('drag-over-left','drag-over-right'); }
+    }
+  }
+  _frd.active = false;
+  _frd.idx = -1;
+  _frd.moved = false;
+  _frd.pid = null;
+  if(wasActive) updateFrameUI();
 }
 
 // ═══════════════════════════════════════
@@ -5331,6 +5476,7 @@ if(window.innerWidth<600){
 }
 newPlay();
 resize();
+initFrameReorder();
 
 // ── オフラインデータ読み込み（非ログイン時） ──
 (async function(){
@@ -5354,6 +5500,12 @@ resize();
         if(local.playFolders && local.playFolders.length > 0) playFolders = local.playFolders;
         if(local.drillFolders && local.drillFolders.length > 0) drillFolders = local.drillFolders;
         if(local.folders && local.folders.length > 0) folders = local.folders;
+        if(local.playFoldersHalf && local.playFoldersHalf.length > 0) playFoldersHalf = local.playFoldersHalf;
+        if(local.playFoldersFull && local.playFoldersFull.length > 0) playFoldersFull = local.playFoldersFull;
+        if(local.drillFoldersHalf && local.drillFoldersHalf.length > 0) drillFoldersHalf = local.drillFoldersHalf;
+        if(local.drillFoldersFull && local.drillFoldersFull.length > 0) drillFoldersFull = local.drillFoldersFull;
+        if(playFoldersHalf.length===0 && playFolders.length>0) playFoldersHalf = playFolders;
+        if(drillFoldersHalf.length===0 && drillFolders.length>0) drillFoldersHalf = drillFolders;
         updatePlaysUI();
       }
     }catch(e){ console.error('IDB initial load error:', e); }
