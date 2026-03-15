@@ -2001,7 +2001,7 @@ function drawArrow(a, alpha=1, progress=1) {
     const lp=pts[pts.length-1],pp=pts[pts.length-2];
     // _screenAngleがあればフリーハンド原データの角度を使う（スムージングで変わらない）
     const sang = a._screenAngle !== undefined ? a._screenAngle : Math.atan2(lp.y-pp.y,lp.x-pp.x);
-    const p=sang+Math.PI/2,bL=16;ctx.lineWidth=3.5;
+    const p=sang+Math.PI/2,bL=11;ctx.lineWidth=2.8;
     ctx.beginPath();ctx.moveTo(lp.x+Math.cos(p)*bL,lp.y+Math.sin(p)*bL);ctx.lineTo(lp.x-Math.cos(p)*bL,lp.y-Math.sin(p)*bL);ctx.stroke();ctx.lineWidth=2.5;
   }
   else if(t==='handoff'){
@@ -2881,20 +2881,14 @@ canvas.addEventListener('pointerup', e=>{
       const smoothed = smoothFreehand(freehandPoints, actionType==='dribble');
       if(smoothed.length>=2){
         saveUndo();
-        // スクリーンの場合: スムージング後も最後の2点の方向を元のフリーハンドから復元
+        // スクリーンの場合: スムージング後も最後の方向を元のフリーハンドから復元
         if(actionType==='screen' && freehandPoints.length>=3){
           const rawLast = freehandPoints[freehandPoints.length-1];
-          // 元のフリーハンドの最後数ポイントから方向を計算
-          const lookback = Math.min(8, freehandPoints.length-1);
-          const rawRef = freehandPoints[freehandPoints.length-1-lookback];
-          const rawAng = Math.atan2(rawLast.y-rawRef.y, rawLast.x-rawRef.x);
-          // スムージング後の最終点を元の位置に戻し、その手前の点を方向に合わせて調整
+          // 最後の2点だけから方向を計算（途中のカーブに影響されない）
+          const rawPrev = freehandPoints[freehandPoints.length-2];
+          const rawAng = Math.atan2(rawLast.y-rawPrev.y, rawLast.x-rawPrev.x);
+          // スムージング後の最終点を元の位置に戻す
           smoothed[smoothed.length-1] = {x:rawLast.x, y:rawLast.y};
-          if(smoothed.length>=3){
-            const prevPt = smoothed[smoothed.length-2];
-            const dist = Math.hypot(prevPt.x-rawLast.x, prevPt.y-rawLast.y);
-            // 手前の点の位置はそのまま（線はスムーズ）、最終点だけ元の位置
-          }
           // 角度情報を保存
           smoothed._screenAngle = rawAng;
         }
