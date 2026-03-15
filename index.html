@@ -481,6 +481,24 @@ body{font-family:'Noto Sans JP',sans-serif;background:var(--bg);color:var(--text
   display:flex;align-items:center;gap:6px;touch-action:manipulation;}
 .fsel-item:active{background:var(--border);}
 
+/* plays sub-tabs (4 categories) */
+.plays-subtabs{display:flex;gap:0;background:var(--panel);border-bottom:1px solid var(--border);
+  flex-shrink:0;overflow-x:auto;}
+.plays-subtab{flex:1;min-width:0;padding:10px 4px;border:none;background:none;
+  font-family:'Noto Sans JP',sans-serif;font-size:12px;font-weight:700;
+  color:var(--text-dim);cursor:pointer;border-bottom:3px solid transparent;
+  touch-action:manipulation;transition:all .15s;white-space:nowrap;text-align:center;}
+.plays-subtab.active{color:var(--accent);border-bottom-color:var(--accent);}
+.plays-subtab:active{background:rgba(0,0,0,.04);}
+.plays-subtab .subtab-icon{font-size:14px;display:block;margin-bottom:2px;}
+.plays-subtab .subtab-count{font-size:9px;color:var(--text-dim);font-weight:400;}
+
+/* rename inline */
+.pc-rename-btn{position:absolute;top:6px;left:6px;background:rgba(0,0,0,.45);border:none;
+  color:#fff;cursor:pointer;font-size:11px;padding:3px 6px;border-radius:4px;
+  opacity:0;line-height:1;touch-action:manipulation;transition:opacity .15s;}
+.pc:hover .pc-rename-btn,.pc:active .pc-rename-btn{opacity:1;}
+
 /* BOTTOM BAR */
 #bar{background:var(--bg2);border-top:1px solid var(--border);
   padding:6px 8px;padding-bottom:max(6px,env(safe-area-inset-bottom));
@@ -506,8 +524,14 @@ body{font-family:'Noto Sans JP',sans-serif;background:var(--bg);color:var(--text
 .sep{width:1px;background:var(--border);height:26px;flex-shrink:0;}
 .fs{display:flex;gap:5px;overflow-x:auto;flex:1;padding:1px 0;}
 .ft{width:50px;height:36px;border-radius:4px;border:2px solid var(--border);
-  cursor:pointer;flex-shrink:0;object-fit:cover;touch-action:manipulation;}
+  cursor:pointer;flex-shrink:0;object-fit:cover;touch-action:manipulation;
+  transition:transform .15s,opacity .15s;}
 .ft.cur{border-color:var(--accent);}
+.ft.dragging{opacity:0.4;transform:scale(0.85);}
+.ft.drag-over-left{border-left:3px solid var(--accent) !important;}
+.ft.drag-over-right{border-right:3px solid var(--accent) !important;}
+.ft-num{position:absolute;bottom:1px;right:2px;font-size:8px;color:rgba(255,255,255,.7);
+  background:rgba(0,0,0,.5);padding:0 3px;border-radius:2px;pointer-events:none;}
 .fi{font-size:11px;color:var(--text-dim);white-space:nowrap;}
 
 /* MODAL */
@@ -723,10 +747,24 @@ body{font-family:'Noto Sans JP',sans-serif;background:var(--bg);color:var(--text
     <button class="btn" style="background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.3);
       color:#fff;padding:4px 8px;font-size:13px" onclick="showFolderModal()">📁</button>
   </div>
-  <!-- タブ切り替え（プレー / ドリル） -->
-  <div id="plays-tabs" style="display:flex;background:var(--panel);border-bottom:1px solid var(--border);flex-shrink:0;">
-    <button class="plays-tab active" data-tab="plays" onclick="switchPlaysTab('plays')">📋 プレー</button>
-    <button class="plays-tab" data-tab="drills" onclick="switchPlaysTab('drills')">🏀 ドリル</button>
+  <!-- タブ切り替え（プレー / ドリル → 4カテゴリ） -->
+  <div id="plays-tabs" class="plays-subtabs">
+    <button class="plays-subtab active" data-tab="plays-half" onclick="switchPlaysTab('plays-half')">
+      <span class="subtab-icon">📋</span>プレー<br>ハーフ
+      <span class="subtab-count" id="count-plays-half"></span>
+    </button>
+    <button class="plays-subtab" data-tab="plays-full" onclick="switchPlaysTab('plays-full')">
+      <span class="subtab-icon">📋</span>プレー<br>フル
+      <span class="subtab-count" id="count-plays-full"></span>
+    </button>
+    <button class="plays-subtab" data-tab="drills-half" onclick="switchPlaysTab('drills-half')">
+      <span class="subtab-icon">🏀</span>ドリル<br>ハーフ
+      <span class="subtab-count" id="count-drills-half"></span>
+    </button>
+    <button class="plays-subtab" data-tab="drills-full" onclick="switchPlaysTab('drills-full')">
+      <span class="subtab-icon">🏀</span>ドリル<br>フル
+      <span class="subtab-count" id="count-drills-full"></span>
+    </button>
   </div>
   <!-- インライン保存フォーム -->
   <div id="inline-save" style="display:none;background:#f0faf5;border-bottom:2px solid var(--accent);
@@ -779,7 +817,10 @@ body{font-family:'Noto Sans JP',sans-serif;background:var(--bg);color:var(--text
       color:var(--text);width:38px;height:38px;border-radius:8px;font-size:20px;cursor:pointer;
       display:flex;align-items:center;justify-content:center;touch-action:manipulation;">←</button>
     <span id="detail-title" style="font-size:16px;font-weight:700;color:var(--text);flex:1;
-      overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></span>
+      overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer" onclick="renameFromDetail()"></span>
+    <button onclick="renameFromDetail()" style="background:var(--card);border:1px solid var(--border);
+      color:var(--text);width:38px;height:38px;border-radius:8px;font-size:16px;cursor:pointer;
+      display:flex;align-items:center;justify-content:center;touch-action:manipulation;">✏️</button>
     <button onclick="deletePlayFromDetail()" style="background:var(--card);border:1px solid var(--border);
       color:var(--red);width:38px;height:38px;border-radius:8px;font-size:16px;cursor:pointer;
       display:flex;align-items:center;justify-content:center;touch-action:manipulation;">🗑</button>
@@ -819,6 +860,18 @@ body{font-family:'Noto Sans JP',sans-serif;background:var(--bg);color:var(--text
     <div class="mda">
       <button class="btn" onclick="closeFolderModal()">キャンセル</button>
       <button class="btn primary" onclick="createFolder()">作成</button>
+    </div>
+  </div>
+</div>
+
+<!-- Rename modal -->
+<div class="mo" id="rename-modal">
+  <div class="md">
+    <h2>✏️ 名前を変更</h2>
+    <input type="text" id="rename-input" placeholder="新しい名前" maxlength="30">
+    <div class="mda">
+      <button class="btn" onclick="closeRenameModal()">キャンセル</button>
+      <button class="btn primary" onclick="confirmRename()">変更</button>
     </div>
   </div>
 </div>
@@ -924,8 +977,8 @@ let tool = 'select', actionType = 'cut', drawColor = '#111111';
 let showSubs = false;
 let players = [], arrows = [], frames = [], plays = [], folders = [], miscs = [];
 let playFolders = [], drillFolders = [];
-function currentFolders(){ return _playsTab === 'drills' ? drillFolders : playFolders; }
-function setCurrentFolders(v){ if(_playsTab === 'drills') drillFolders = v; else playFolders = v; }
+function currentFolders(){ return _isDrillTab() ? drillFolders : playFolders; }
+function setCurrentFolders(v){ if(_isDrillTab()) drillFolders = v; else playFolders = v; }
 
 
 let currentUser = null; // Firebase user object
@@ -1214,7 +1267,9 @@ function savePlayInline(){
   const sel  = document.getElementById('inline-folder-sel');
   const folderId = sel && sel.value ? parseInt(sel.value) : null;
   if(frames.length===0){ alert('フレームがありません。先に「追加」ボタンでフレームを作成してください。'); return; }
-  const entry = {id:Date.now(), name, frames:cloneFrames(frames), folderId};
+  // Auto-detect court mode from current state
+  const savedCourtMode = courtMode;
+  const entry = {id:Date.now(), name, frames:cloneFrames(frames), folderId, courtMode: savedCourtMode};
   if(_saveType === 'drill') {
     drills.push(entry);
   } else {
@@ -1222,7 +1277,15 @@ function savePlayInline(){
   }
   currentPlayId = entry.id;
   closeInlineSave();
-  _playsTab = _saveType === 'drill' ? 'drills' : 'plays';
+  // Auto-switch to correct tab
+  if(_saveType === 'drill') {
+    _playsTab = savedCourtMode === 'full' ? 'drills-full' : 'drills-half';
+  } else {
+    _playsTab = savedCourtMode === 'full' ? 'plays-full' : 'plays-half';
+  }
+  document.querySelectorAll('#plays-tabs .plays-subtab').forEach(b => {
+    b.classList.toggle('active', b.dataset.tab === _playsTab);
+  });
   updatePlaysUI();
   syncToCloud();
   showSyncBadge('✅ 保存：' + name);
@@ -3094,10 +3157,16 @@ function updateFrameUI(){
     if(!f.thumbnail || f.thumbnail.length < 50){
       try { regenerateFrameThumb(f); } catch(e){}
     }
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'position:relative;flex-shrink:0;';
     const img=document.createElement('img');
     img.src=f.thumbnail||'';img.className='ft'+(i===currentFrame?' cur':'');
-    img.onerror=function(){ this.style.display='none'; const d=document.createElement('div'); d.className='ft'+(i===currentFrame?' cur':''); d.style.cssText='display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--text-dim);background:var(--card);'; d.textContent=(i+1); d.title='フレーム '+(i+1); d.onclick=()=>loadFrame(i); this.parentNode.replaceChild(d,this); };
-    img.title='フレーム '+(i+1);img.onclick=()=>loadFrame(i);strip.appendChild(img);
+    img.onerror=function(){ this.style.display='none'; const d=document.createElement('div'); d.className='ft'+(i===currentFrame?' cur':''); d.style.cssText='display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--text-dim);background:var(--card);'; d.textContent=(i+1); d.title='フレーム '+(i+1); d.onclick=()=>loadFrame(i); setupFrameDrag(d, i); this.parentNode.replaceChild(d,this); };
+    img.title='フレーム '+(i+1);
+    img.onclick=()=>{ if(_frameDragIdx < 0) loadFrame(i); };
+    setupFrameDrag(img, i);
+    wrap.appendChild(img);
+    strip.appendChild(wrap);
   });
   document.getElementById('frame-info').textContent=`${frames.length===0?0:currentFrame+1}/${frames.length}`;
   document.getElementById('btn-del').disabled=frames.length===0;
@@ -4345,13 +4414,34 @@ function generatePlayThumb(frameData) {
 }
 
 // ── Plays tab state ──
-let _playsTab = 'plays'; // 'plays' | 'drills'
+let _playsTab = 'plays-half'; // 'plays-half' | 'plays-full' | 'drills-half' | 'drills-full'
 let _saveType = 'play';  // 'play' | 'drill'
-let drills = []; // {id, name, frames, folderId, memo}
+let drills = []; // {id, name, frames, folderId, memo, courtMode}
+
+function _isPlayTab(){ return _playsTab === 'plays-half' || _playsTab === 'plays-full'; }
+function _isDrillTab(){ return _playsTab === 'drills-half' || _playsTab === 'drills-full'; }
+function _isHalfTab(){ return _playsTab === 'plays-half' || _playsTab === 'drills-half'; }
+function _isFullTab(){ return _playsTab === 'plays-full' || _playsTab === 'drills-full'; }
+
+function _getCourtModeForTab(){
+  return _isHalfTab() ? 'half' : 'full';
+}
+
+// Get the source list for current tab
+function _getSourceList(){
+  if(_isPlayTab()) return plays;
+  return drills;
+}
+
+// Filter source list by court mode for current tab
+function _getFilteredByCourtMode(list){
+  const mode = _getCourtModeForTab();
+  return list.filter(p => (p.courtMode || 'half') === mode);
+}
 
 function switchPlaysTab(tab) {
   _playsTab = tab;
-  document.querySelectorAll('#plays-tabs .plays-tab').forEach(b => {
+  document.querySelectorAll('#plays-tabs .plays-subtab').forEach(b => {
     b.classList.toggle('active', b.dataset.tab === tab);
   });
   updatePlaysUI();
@@ -4397,7 +4487,7 @@ function createFolder(){
 }
 function deleteFolder(fid){
   if(!confirm('フォルダを削除しますか？（中のプレーは残ります）'))return;
-  const list = _playsTab === 'drills' ? drills : plays;
+  const list = _isDrillTab() ? drills : plays;
   list.forEach(p=>{if(p.folderId===fid)p.folderId=null;});
   setCurrentFolders(currentFolders().filter(f=>f.id!==fid));
   updatePlaysUI();
@@ -4408,7 +4498,7 @@ function toggleFolder(fid){
   if(f){f.open=!f.open;updatePlaysUI();}
 }
 function movePlayToFolder(playId, folderId){
-  const list = _playsTab === 'drills' ? drills : plays;
+  const list = _isDrillTab() ? drills : plays;
   const p=list.find(p=>p.id===playId);
   if(p) p.folderId=folderId;
   updatePlaysUI();
@@ -4420,21 +4510,30 @@ function savePlay(){
   const name=document.getElementById('play-name-input').value.trim()||'無名のプレー';
   const sel=document.getElementById('folder-select');
   const folderId=sel&&sel.value?parseInt(sel.value):null;
-  plays.push({id:Date.now(),name,frames:cloneFrames(frames),folderId:folderId||null});
+  plays.push({id:Date.now(),name,frames:cloneFrames(frames),folderId:folderId||null,courtMode:courtMode});
   currentPlayId=plays[plays.length-1].id;closeModal();updatePlaysUI();
   syncToCloud();
 }
 function loadPlay(id){
-  const list = _playsTab === 'drills' ? drills : plays;
-  const play=list.find(p=>p.id===id);if(!play)return;
+  let play = (_isDrillTab() ? drills : plays).find(p=>p.id===id);
+  // Also search the other list in case tab doesn't match
+  if(!play) play = plays.find(p=>p.id===id);
+  if(!play) play = drills.find(p=>p.id===id);
+  if(!play)return;
   if(isPlaying)stopPlay();
+  // Restore court mode if saved
+  if(play.courtMode && play.courtMode !== courtMode){
+    setCourt(play.courtMode);
+  }
   currentPlayId=id;frames=cloneFrames(play.frames);currentFrame=0;
   if(frames.length>0)loadFrame(0);updateFrameUI();updatePlaysUI();
   closePlaysScreen();
 }
 function deletePlay(id){
   if(!confirm('削除しますか？'))return;
-  if(_playsTab === 'drills') {
+  // Remove from whichever list contains it
+  const inDrills = drills.some(p=>p.id===id);
+  if(inDrills) {
     drills=drills.filter(p=>p.id!==id);
   } else {
     plays=plays.filter(p=>p.id!==id);
@@ -4460,6 +4559,7 @@ function makePlayCard(play){
   const fCount = play.frames ? play.frames.length : 0;
   card.innerHTML=`${thumbHtml}<div class="pc-info"><div class="pn">${play.name}</div>`+
     `<div class="pm">${fCount} フレーム</div></div>`+
+    `<button class="pc-rename-btn" onclick="event.stopPropagation();renamePlay(${play.id})">✏️</button>`+
     `<button class="pd" onclick="event.stopPropagation();deletePlay(${play.id})">✕</button>`;
   card.onclick=()=>openPlayDetail(play.id);
 
@@ -4526,17 +4626,28 @@ function openPlaysScreen(){
     }
   });
   // タブにドロップゾーン設定（プレー↔ドリル移動用）
-  document.querySelectorAll('#plays-tabs .plays-tab').forEach(btn => {
+  document.querySelectorAll('#plays-tabs .plays-subtab').forEach(btn => {
     btn.addEventListener('dragover', e => { e.preventDefault(); e.dataTransfer.dropEffect='move'; btn.style.background='#c8f0d8'; });
     btn.addEventListener('dragleave', () => { btn.style.background=''; });
     btn.addEventListener('drop', e => {
       e.preventDefault(); btn.style.background='';
       try{
         const data = JSON.parse(e.dataTransfer.getData('text/plain'));
-        const targetTab = btn.dataset.tab; // 'plays' or 'drills'
+        const targetTab = btn.dataset.tab; // 'plays-half', 'plays-full', etc
         const fromTab = data.fromTab;
         if(data.playId && fromTab && fromTab !== targetTab){
-          movePlayBetweenTabs(data.playId, fromTab, targetTab);
+          const targetIsDrill = targetTab.startsWith('drills');
+          const fromIsDrill = fromTab.startsWith('drills');
+          const targetCourt = targetTab.includes('full') ? 'full' : 'half';
+          if(targetIsDrill !== fromIsDrill){
+            movePlayBetweenTabs(data.playId, fromIsDrill ? 'drills' : 'plays', targetIsDrill ? 'drills' : 'plays');
+          }
+          // Update court mode
+          const allLists = [...plays, ...drills];
+          const item = allLists.find(p => p.id === data.playId);
+          if(item) item.courtMode = targetCourt;
+          switchPlaysTab(targetTab);
+          syncToCloud();
         }
       }catch(ex){}
     });
@@ -4561,14 +4672,25 @@ function updatePlaysUI(){
   if(!list)return;
   list.innerHTML='';
   const q = _searchQuery||'';
-  const sourceList = _playsTab === 'drills' ? drills : plays;
-  const filteredList = q ? sourceList.filter(p=>p.name.toLowerCase().includes(q)) : sourceList;
+  const sourceList = _isDrillTab() ? drills : plays;
+  // Filter by court mode
+  const courtFiltered = _getFilteredByCourtMode(sourceList);
+  const filteredList = q ? courtFiltered.filter(p=>p.name.toLowerCase().includes(q)) : courtFiltered;
 
-  if(sourceList.length===0&&currentFolders().length===0){
-    const emptyMsg = _playsTab === 'drills'
-      ? '「＋ 保存」→「ドリル」でドリルを記録できます'
-      : '「＋ 保存」でプレーを記録できます';
-    list.innerHTML=`<div style="color:var(--text-dim);font-size:13px;padding:20px;text-align:center">${emptyMsg}</div>`;
+  // Update tab counts
+  const ch = document.getElementById('count-plays-half');
+  const cf = document.getElementById('count-plays-full');
+  const dh = document.getElementById('count-drills-half');
+  const df = document.getElementById('count-drills-full');
+  if(ch) ch.textContent = plays.filter(p=>(p.courtMode||'half')==='half').length || '';
+  if(cf) cf.textContent = plays.filter(p=>(p.courtMode||'half')==='full').length || '';
+  if(dh) dh.textContent = drills.filter(p=>(p.courtMode||'half')==='half').length || '';
+  if(df) df.textContent = drills.filter(p=>(p.courtMode||'half')==='full').length || '';
+
+  if(courtFiltered.length===0&&currentFolders().length===0){
+    const courtLabel = _isHalfTab() ? 'ハーフコート' : 'フルコート';
+    const typeLabel = _isDrillTab() ? 'ドリル' : 'プレー';
+    list.innerHTML=`<div style="color:var(--text-dim);font-size:13px;padding:20px;text-align:center">${courtLabel}の${typeLabel}はまだありません</div>`;
     return;
   }
   if(q && filteredList.length===0){
@@ -4578,7 +4700,7 @@ function updatePlaysUI(){
 
   // Folders
   currentFolders().forEach(f=>{
-    const folderItems=(q?filteredList:sourceList).filter(p=>p.folderId===f.id);
+    const folderItems=(q?filteredList:courtFiltered).filter(p=>p.folderId===f.id);
     const wrap=document.createElement('div');
     wrap.className='pf pf-grid';
     const hdr=document.createElement('div');
@@ -4626,7 +4748,7 @@ function updatePlaysUI(){
   });
 
   // Ungrouped in grid（フォルダ外ドロップゾーン）
-  const ungrouped=(q?filteredList:sourceList).filter(p=>!p.folderId);
+  const ungrouped=(q?filteredList:courtFiltered).filter(p=>!p.folderId);
   const ungroupedWrap = document.createElement('div');
   ungroupedWrap.style.cssText = 'min-height:40px;padding:4px 0;';
   // フォルダ外へのドロップ
@@ -4655,8 +4777,8 @@ function updatePlaysUI(){
 let _detailPlayId = null;
 
 function openPlayDetail(id) {
-  const list = _playsTab === 'drills' ? drills : plays;
-  const play = list.find(p => p.id === id);
+  let play = plays.find(p => p.id === id);
+  if(!play) play = drills.find(p => p.id === id);
   if (!play) return;
   _detailPlayId = id;
 
@@ -4694,8 +4816,8 @@ function closePlayDetail() {
 let _memoSaveTimer = null;
 function saveDetailMemo() {
   if (_detailPlayId === null) return;
-  const list = _playsTab === 'drills' ? drills : plays;
-  const play = list.find(p => p.id === _detailPlayId);
+  let play = plays.find(p => p.id === _detailPlayId);
+  if(!play) play = drills.find(p => p.id === _detailPlayId);
   if (!play) return;
   play.memo = document.getElementById('detail-memo').value;
   // デバウンスして保存
@@ -4717,7 +4839,8 @@ function deletePlayFromDetail() {
   const id = _detailPlayId;
   closePlayDetail();
   // deletePlayを呼ぶ
-  if (_playsTab === 'drills') {
+  const inDrills = drills.some(p => p.id === id);
+  if (inDrills) {
     drills = drills.filter(p => p.id !== id);
   } else {
     plays = plays.filter(p => p.id !== id);
@@ -4729,6 +4852,149 @@ function deletePlayFromDetail() {
   updatePlaysUI();
   if (currentUser) window._fbDeletePlay(currentUser.uid, id);
   syncToCloud();
+}
+
+// ═══════════════════════════════════════
+//  RENAME PLAY / DRILL
+// ═══════════════════════════════════════
+let _renamePlayId = null;
+
+function openRenameModal(playId, currentName){
+  _renamePlayId = playId;
+  document.getElementById('rename-input').value = currentName || '';
+  document.getElementById('rename-modal').classList.add('show');
+  setTimeout(()=>{
+    const inp = document.getElementById('rename-input');
+    inp.focus(); inp.select();
+  }, 50);
+}
+function closeRenameModal(){
+  document.getElementById('rename-modal').classList.remove('show');
+  _renamePlayId = null;
+}
+function confirmRename(){
+  if(_renamePlayId === null) return;
+  const newName = document.getElementById('rename-input').value.trim();
+  if(!newName){ closeRenameModal(); return; }
+  // Find in both lists
+  let play = plays.find(p => p.id === _renamePlayId);
+  if(!play) play = drills.find(p => p.id === _renamePlayId);
+  if(play){
+    play.name = newName;
+    updatePlaysUI();
+    // Update detail title if open
+    const dt = document.getElementById('detail-title');
+    if(dt && _detailPlayId === _renamePlayId) dt.textContent = newName;
+    syncToCloud();
+    showSyncBadge('✏️ 名前変更：' + newName);
+  }
+  closeRenameModal();
+}
+document.getElementById('rename-input').addEventListener('keydown', e => {
+  if(e.key==='Enter') confirmRename();
+  if(e.key==='Escape') closeRenameModal();
+});
+
+function renameFromDetail(){
+  if(_detailPlayId === null) return;
+  let play = plays.find(p => p.id === _detailPlayId);
+  if(!play) play = drills.find(p => p.id === _detailPlayId);
+  if(play) openRenameModal(play.id, play.name);
+}
+
+function renamePlay(id){
+  let play = plays.find(p => p.id === id);
+  if(!play) play = drills.find(p => p.id === id);
+  if(play) openRenameModal(play.id, play.name);
+}
+
+// ═══════════════════════════════════════
+//  FRAME REORDER (long-press drag)
+// ═══════════════════════════════════════
+let _frameDragIdx = -1;
+let _frameDragOverIdx = -1;
+let _frameLongPress = null;
+
+function setupFrameDrag(el, idx){
+  let pressTimer = null;
+  let startX = 0, startY = 0;
+  let moved = false;
+
+  el.addEventListener('pointerdown', e => {
+    startX = e.clientX; startY = e.clientY; moved = false;
+    pressTimer = setTimeout(()=>{
+      if(!moved){
+        _frameDragIdx = idx;
+        el.classList.add('dragging');
+        // Vibrate on mobile
+        if(navigator.vibrate) navigator.vibrate(30);
+      }
+    }, 400);
+  });
+
+  el.addEventListener('pointermove', e => {
+    if(Math.abs(e.clientX - startX) > 8 || Math.abs(e.clientY - startY) > 8){
+      moved = true;
+      if(_frameDragIdx < 0){ clearTimeout(pressTimer); return; }
+    }
+    if(_frameDragIdx >= 0){
+      e.preventDefault();
+      // Find which frame we're over
+      const strip = document.getElementById('frames-strip');
+      const children = strip.children;
+      let overIdx = -1;
+      for(let i = 0; i < children.length; i++){
+        const rect = children[i].getBoundingClientRect();
+        const mx = e.clientX;
+        if(mx >= rect.left && mx <= rect.right){
+          overIdx = i;
+          // Show indicator
+          children[i].classList.remove('drag-over-left','drag-over-right');
+          if(mx < rect.left + rect.width/2){
+            children[i].classList.add('drag-over-left');
+          } else {
+            children[i].classList.add('drag-over-right');
+          }
+        } else {
+          children[i].classList.remove('drag-over-left','drag-over-right');
+        }
+      }
+      _frameDragOverIdx = overIdx;
+    }
+  });
+
+  const endDrag = (e) => {
+    clearTimeout(pressTimer);
+    if(_frameDragIdx >= 0 && _frameDragOverIdx >= 0 && _frameDragIdx !== _frameDragOverIdx){
+      // Determine insert position
+      const strip = document.getElementById('frames-strip');
+      const children = strip.children;
+      let insertBefore = _frameDragOverIdx;
+      if(_frameDragOverIdx >= 0 && _frameDragOverIdx < children.length){
+        const rect = children[_frameDragOverIdx].getBoundingClientRect();
+        if(e && e.clientX > rect.left + rect.width/2) insertBefore = _frameDragOverIdx + 1;
+      }
+      // Reorder frames array
+      const movedFrame = frames.splice(_frameDragIdx, 1)[0];
+      const newIdx = insertBefore > _frameDragIdx ? insertBefore - 1 : insertBefore;
+      frames.splice(newIdx, 0, movedFrame);
+      currentFrame = newIdx;
+      loadFrame(currentFrame);
+      updateFrameUI();
+    }
+    // Clean up
+    const strip = document.getElementById('frames-strip');
+    if(strip){
+      for(let c of strip.children){
+        c.classList.remove('dragging','drag-over-left','drag-over-right');
+      }
+    }
+    _frameDragIdx = -1;
+    _frameDragOverIdx = -1;
+  };
+
+  el.addEventListener('pointerup', endDrag);
+  el.addEventListener('pointercancel', endDrag);
 }
 
 // ═══════════════════════════════════════
