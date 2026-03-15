@@ -183,6 +183,11 @@ if (FIREBASE_CONFIG) {
     const oldDrills = await getDocs(collection(db,'users',uid,'drills'));
     oldDrills.forEach(d => { if(!drillIds.has(d.id)) delOps.push(deleteDoc(d.ref)); });
     for(const d of (data.drills||[])) await setDoc(doc(db,'users',uid,'drills',String(d.id)), stripThumbs(d));
+    // Playbooks
+    const pbIds = new Set((data.playbooks||[]).map(p=>String(p.id)));
+    const oldPbs = await getDocs(collection(db,'users',uid,'playbooks'));
+    oldPbs.forEach(d => { if(!pbIds.has(d.id)) delOps.push(deleteDoc(d.ref)); });
+    for(const p of (data.playbooks||[])) await setDoc(doc(db,'users',uid,'playbooks',String(p.id)), stripThumbs(p));
     if(delOps.length) await Promise.all(delOps);
   };
 
@@ -203,10 +208,14 @@ if (FIREBASE_CONFIG) {
     try { const drillsSnap = await getDocs(collection(db,'users',uid,'drills'));
       drillsSnap.forEach(d => drillsList.push(d.data()));
     } catch(e){}
+    let playbooksList = [];
+    try { const pbSnap = await getDocs(collection(db,'users',uid,'playbooks'));
+      pbSnap.forEach(d => playbooksList.push(d.data()));
+    } catch(e){}
     return {folders, playFolders: pf, drillFolders: df,
       playFoldersHalf: pfh, playFoldersFull: pff,
       drillFoldersHalf: dfh, drillFoldersFull: dff,
-      plays, drills: drillsList};
+      plays, drills: drillsList, playbooks: playbooksList};
   };
 
   window._fbDeletePlay = async (uid, playId) => {
@@ -281,6 +290,7 @@ if (FIREBASE_CONFIG) {
          await idbSet('playFoldersFull', data.playFoldersFull || []);
          await idbSet('drillFoldersHalf', data.drillFoldersHalf || []);
          await idbSet('drillFoldersFull', data.drillFoldersFull || []);
+         await idbSet('playbooks', data.playbooks || []);
     }catch(e){ console.error('IDB save error:', e); }
   };
 
@@ -295,9 +305,10 @@ if (FIREBASE_CONFIG) {
       const playFoldersFull = await idbGet('playFoldersFull') || [];
       const drillFoldersHalf = await idbGet('drillFoldersHalf') || [];
       const drillFoldersFull = await idbGet('drillFoldersFull') || [];
+      const playbooks = await idbGet('playbooks') || [];
       return {plays, drills, playFolders, drillFolders, folders,
-        playFoldersHalf, playFoldersFull, drillFoldersHalf, drillFoldersFull};
-    }catch(e){ console.error('IDB load error:', e); return {plays:[],drills:[],playFolders:[],drillFolders:[],folders:[],playFoldersHalf:[],playFoldersFull:[],drillFoldersHalf:[],drillFoldersFull:[]}; }
+        playFoldersHalf, playFoldersFull, drillFoldersHalf, drillFoldersFull, playbooks};
+    }catch(e){ console.error('IDB load error:', e); return {plays:[],drills:[],playFolders:[],drillFolders:[],folders:[],playFoldersHalf:[],playFoldersFull:[],drillFoldersHalf:[],drillFoldersFull:[],playbooks:[]}; }
   };
 
   // オンライン/オフラインイベント
@@ -658,7 +669,6 @@ body{font-family:'Noto Sans JP',sans-serif;background:var(--bg);color:var(--text
         <button class="abtn"        id="action-screen"  onclick="setAction('screen')"> <span class="ai">⊣</span>スクリーン</button>
         <button class="abtn"        id="action-handoff" onclick="setAction('handoff')"><span class="ai">─||─</span>ハンドオフ</button>
         <button class="abtn"        id="action-shot"    onclick="setAction('shot')">   <span class="ai">⊗</span>シュート</button>
-        <button class="abtn"        id="action-curve"   onclick="setAction('curve')">  <span class="ai">〜</span>曲線</button>
       </div>
 
       <div class="sec" style="margin-top:3px">色</div>
@@ -677,6 +687,7 @@ body{font-family:'Noto Sans JP',sans-serif;background:var(--bg);color:var(--text
       <button class="tbtn" id="btn-subs" onclick="toggleSubs()"><span class="ic">👥</span>６〜１０番を表示</button>
 
       <div class="sec" style="margin-top:3px">その他</div>
+      <button class="tbtn" id="tool-pen" onclick="setTool('pen')"><span class="ic">✏️</span>フリーペン</button>
       <div class="agrid" style="gap:4px;">
         <button class="tbtn" onclick="addMisc('cone')"><span class="ic">🔺</span>コーン</button>
         <button class="tbtn" onclick="addMisc('circle')"><span class="ic">⭕</span>サークル</button>
@@ -686,6 +697,7 @@ body{font-family:'Noto Sans JP',sans-serif;background:var(--bg);color:var(--text
 
       <div class="sec" style="margin-top:3px">クリア</div>
       <button class="tbtn" onclick="clearArrows()"><span class="ic">🧹</span>矢印クリア</button>
+      <button class="tbtn" onclick="clearPenStrokes()"><span class="ic">✏️</span>ペン消去</button>
       <button class="tbtn" onclick="resetBoard()"> <span class="ic">🔄</span>盤面リセット</button>
       <button class="tbtn" onclick="showTemplates()" style="margin-top:6px;background:#5c6bc0;color:#fff;border-color:#5c6bc0;font-weight:600;opacity:0.9">
         <span class="ic">📐</span>テンプレート</button>
@@ -707,7 +719,8 @@ body{font-family:'Noto Sans JP',sans-serif;background:var(--bg);color:var(--text
       <button class="mtbtn" id="mt-screen"  onclick="setAction('screen')"  title="スクリーン">⊣</button>
       <button class="mtbtn" id="mt-handoff" onclick="setAction('handoff')" title="ハンドオフ">⇌</button>
       <button class="mtbtn" id="mt-shot"    onclick="setAction('shot')"    title="シュート">⊗</button>
-      <button class="mtbtn" id="mt-curve"   onclick="setAction('curve')"   title="曲線">〜→</button>
+      <div class="mt-sep"></div>
+      <button class="mtbtn" id="mt-pen"     onclick="setTool('pen')"       title="フリーペン">✏</button>
     </div>
     <div class="sb-tab" id="sb-tab" onclick="toggleSB()">◀</div>
   </div>
@@ -733,8 +746,8 @@ body{font-family:'Noto Sans JP',sans-serif;background:var(--bg);color:var(--text
 <!-- Bottom bar -->
 <div id="bar">
   <button class="btn success" onclick="addFrame()">📸 追加</button>
-  <button class="btn" style="background:#7b1fa2;color:#fff;border-color:#7b1fa2" onclick="exportVideo()">🎬</button>
-  <button class="btn" style="background:#d84315;color:#fff;border-color:#d84315" onclick="exportPDF()">📄</button>
+  <button class="btn" style="background:#7b1fa2;color:#fff;border-color:#7b1fa2" onclick="showVideoExportModal()">🎬</button>
+  <button class="btn" style="background:#d84315;color:#fff;border-color:#d84315" onclick="showPDFChoiceModal()">📄</button>
   <div class="sep"></div>
   <button class="btn" onclick="prevFrame()">◀</button>
   <button class="btn primary" id="btn-play" onclick="togglePlay()">▶ 再生</button>
@@ -782,6 +795,10 @@ body{font-family:'Noto Sans JP',sans-serif;background:var(--bg);color:var(--text
     <button class="plays-subtab" data-tab="drills-full" onclick="switchPlaysTab('drills-full')">
       <span class="subtab-icon">🏀</span>ドリル<br>フル
       <span class="subtab-count" id="count-drills-full"></span>
+    </button>
+    <button class="plays-subtab" data-tab="playbooks" onclick="switchPlaysTab('playbooks')">
+      <span class="subtab-icon">📕</span>プレー<br>ブック
+      <span class="subtab-count" id="count-playbooks"></span>
     </button>
   </div>
   <!-- インライン保存フォーム -->
@@ -964,6 +981,37 @@ body{font-family:'Noto Sans JP',sans-serif;background:var(--bg);color:var(--text
   </div>
 </div>
 
+<!-- Video name modal -->
+<div class="mo" id="video-name-modal">
+  <div class="md">
+    <h2>🎬 動画の書き出し</h2>
+    <input type="text" id="video-name-input" placeholder="ファイル名（例: ピックアンドロール）" maxlength="40"
+      style="width:100%;padding:10px 11px;background:var(--card);border:1px solid var(--border);color:var(--text);border-radius:7px;font-family:'Noto Sans JP',sans-serif;font-size:13px;outline:none;">
+    <div class="mda">
+      <button class="btn" onclick="closeVideoNameModal()">キャンセル</button>
+      <button class="btn primary" onclick="confirmVideoExport()">次へ</button>
+    </div>
+  </div>
+</div>
+
+<!-- PDF choice modal -->
+<div class="mo" id="pdf-choice-modal">
+  <div class="md" style="max-width:360px;">
+    <h2>📄 PDF</h2>
+    <input type="text" id="pdf-name-input" placeholder="名前（例: オフェンスセット集）" maxlength="40"
+      style="width:100%;padding:10px 11px;background:var(--card);border:1px solid var(--border);color:var(--text);border-radius:7px;font-family:'Noto Sans JP',sans-serif;font-size:13px;outline:none;margin-bottom:12px;">
+    <div style="display:flex;flex-direction:column;gap:10px;">
+      <button class="btn primary" onclick="confirmPDFExport()" style="width:100%;justify-content:center;padding:14px;font-size:14px;">
+        📥 PDFファイルとして出力</button>
+      <button class="btn" onclick="confirmPDFSaveToPlays()" style="width:100%;justify-content:center;padding:14px;font-size:14px;background:#1565c0;color:#fff;border-color:#1565c0;">
+        📋 PLAYSにプレーブックとして保存</button>
+    </div>
+    <div class="mda" style="margin-top:10px;">
+      <button class="btn" onclick="closePDFChoiceModal()" style="width:100%;justify-content:center;">キャンセル</button>
+    </div>
+  </div>
+</div>
+
 <!-- Save modal -->
 <div class="mo" id="modal">
   <div class="md">
@@ -1133,6 +1181,7 @@ window.onFbAuthChange = async function(user){
         if(local.playFoldersFull && local.playFoldersFull.length > 0) playFoldersFull = local.playFoldersFull;
         if(local.drillFoldersHalf && local.drillFoldersHalf.length > 0) drillFoldersHalf = local.drillFoldersHalf;
         if(local.drillFoldersFull && local.drillFoldersFull.length > 0) drillFoldersFull = local.drillFoldersFull;
+        if(local.playbooks && local.playbooks.length > 0) playbooks = local.playbooks;
         if(playFoldersHalf.length===0 && playFolders.length>0) playFoldersHalf = playFolders;
         if(drillFoldersHalf.length===0 && drillFolders.length>0) drillFoldersHalf = drillFolders;
         updatePlaysUI();
@@ -1187,10 +1236,15 @@ async function syncFromCloud(){
         const localDrillsOnly = drills.filter(d=>!cloudDrillIds.has(d.id));
         drills = [...data.drills, ...localDrillsOnly];
       }
+      if(data.playbooks && data.playbooks.length > 0){
+        const cloudPbIds = new Set(data.playbooks.map(p=>p.id));
+        const localPbOnly = playbooks.filter(p=>!cloudPbIds.has(p.id));
+        playbooks = [...data.playbooks, ...localPbOnly];
+      }
       updatePlaysUI();
       // ローカルにもバックアップ
       if(window._idbSave) window._idbSave({plays, drills, playFolders, drillFolders, folders,
-        playFoldersHalf, playFoldersFull, drillFoldersHalf, drillFoldersFull}).catch(()=>{});
+        playFoldersHalf, playFoldersFull, drillFoldersHalf, drillFoldersFull, playbooks}).catch(()=>{});
       showSyncBadge('☁️ クラウドから読み込みました');
     }
   } catch(e){
@@ -1211,6 +1265,7 @@ async function syncFromCloud(){
           if(local.playFoldersFull && local.playFoldersFull.length > 0) playFoldersFull = local.playFoldersFull;
           if(local.drillFoldersHalf && local.drillFoldersHalf.length > 0) drillFoldersHalf = local.drillFoldersHalf;
           if(local.drillFoldersFull && local.drillFoldersFull.length > 0) drillFoldersFull = local.drillFoldersFull;
+        if(local.playbooks && local.playbooks.length > 0) playbooks = local.playbooks;
           // 旧形式マイグレーション
           if(playFoldersHalf.length===0 && playFolders.length>0) playFoldersHalf = playFolders;
           if(drillFoldersHalf.length===0 && drillFolders.length>0) drillFoldersHalf = drillFolders;
@@ -1226,7 +1281,7 @@ async function syncToCloud(){
   // 常にIndexedDBにローカル保存（オフライン対応）
   if(window._idbSave){
     try{ await window._idbSave({plays, drills, playFolders, drillFolders, folders,
-      playFoldersHalf, playFoldersFull, drillFoldersHalf, drillFoldersFull}); }
+      playFoldersHalf, playFoldersFull, drillFoldersHalf, drillFoldersFull, playbooks}); }
     catch(e){ console.error('IDB backup error:', e); }
   }
   if(!currentUser) return;
@@ -1236,7 +1291,7 @@ async function syncToCloud(){
   }
   try{
     await window._fbSaveData(currentUser.uid, {plays, folders, drills, playFolders, drillFolders,
-      playFoldersHalf, playFoldersFull, drillFoldersHalf, drillFoldersFull});
+      playFoldersHalf, playFoldersFull, drillFoldersHalf, drillFoldersFull, playbooks});
     showSyncBadge('☁️ 同期しました');
   } catch(e){ console.error('save error',e); showSyncBadge('⚠️ 同期エラー（ローカル保存済み）'); }
 }
@@ -2650,6 +2705,7 @@ function render(fromF=null, toF=null, moveT=0, arrowT=null, steps=null) {
     if(previewArrow) drawArrow(previewArrow, 0.5);
     players.forEach(p=>{if(!p._sub||showSubs)drawPlayer(p);});
     drawCurvePreview();
+    if(typeof drawPenStrokes==='function') drawPenStrokes();
   }
   ctx.restore();
 }
@@ -2683,6 +2739,12 @@ function hitArrow(x,y) {
 canvas.addEventListener('pointerdown', e=>{
   e.preventDefault();
   const {x,y}=getPos(e);
+  if(tool==='pen'){
+    _penDrawing = true;
+    _penCurrent = [{x,y}];
+    canvas.setPointerCapture(e.pointerId);
+    return;
+  }
   if(tool==='ball'){
     const p=hitPlayer(x,y);
     if(p){
@@ -2750,8 +2812,16 @@ canvas.addEventListener('pointerdown', e=>{
 },{passive:false});
 
 canvas.addEventListener('pointermove', e=>{
-  if(dragTarget||isDrawing||curveActive||_miscDragging||_miscResizing||_miscRotating) e.preventDefault();
+  if(dragTarget||isDrawing||curveActive||_miscDragging||_miscResizing||_miscRotating||_penDrawing) e.preventDefault();
   const {x,y}=getPos(e);
+  // pen drawing
+  if(_penDrawing){
+    if(_penCurrent.length>0){
+      const last=_penCurrent[_penCurrent.length-1];
+      if(Math.hypot(x-last.x,y-last.y)>3) _penCurrent.push({x,y});
+    }
+    render(); return;
+  }
   // misc回転
   if(_miscRotating){
     const m = _miscRotating;
@@ -2788,6 +2858,17 @@ canvas.addEventListener('pointermove', e=>{
 
 canvas.addEventListener('pointerup', e=>{
   const {x,y}=getPos(e);
+  // pen stroke finish
+  if(_penDrawing){
+    _penDrawing = false;
+    if(_penCurrent.length >= 2){
+      saveUndo();
+      penStrokes.push({pts:[..._penCurrent], color:drawColor, width:2});
+    }
+    _penCurrent = [];
+    render();
+    return;
+  }
   // misc
   if(_miscDragging){ _miscDragging = null; render(); }
   if(_miscResizing){ _miscResizing = null; render(); }
@@ -2873,11 +2954,11 @@ window.addEventListener('keydown',e=>{
 function setTool(t){
   if(curveActive){curveActive=false;curvePoints=[];curvePreviewPt=null;showCurveUI(false);}
   tool=t;
-  ['select','draw','erase','ball'].forEach(id=>{
+  ['select','draw','erase','ball','pen'].forEach(id=>{
     const el=document.getElementById('tool-'+id);if(el)el.classList.toggle('active',t===id);
     const mt=document.getElementById('mt-'+id);if(mt)mt.classList.toggle('tool-active',t===id);
   });
-  canvas.style.cursor=(t==='draw')?'crosshair':t==='erase'?'cell':t==='ball'?'pointer':'default';
+  canvas.style.cursor=(t==='draw')?'crosshair':t==='erase'?'cell':t==='ball'?'pointer':t==='pen'?'crosshair':'default';
 }
 function setAction(a){
   if(curveActive){curveActive=false;curvePoints=[];curvePreviewPt=null;showCurveUI(false);render();}
@@ -2885,7 +2966,7 @@ function setAction(a){
   document.querySelectorAll('.abtn').forEach(b=>b.classList.remove('active'));
   const el=document.getElementById('action-'+a);if(el)el.classList.add('active');
   // ミニツールバーのアクションボタン更新
-  ['cut','pass','dribble','screen','handoff','shot','curve'].forEach(id=>{
+  ['cut','pass','dribble','screen','handoff','shot'].forEach(id=>{
     const mt=document.getElementById('mt-'+id);
     if(mt)mt.classList.toggle('tool-active',a===id);
   });
@@ -2923,7 +3004,7 @@ function initBoard(){
 
 function resetBoard(){
   saveUndo();
-  arrows=[];miscs=[];freshPlayers();render();
+  arrows=[];miscs=[];penStrokes=[];freshPlayers();render();
 }
 
 function addExtra(type){
@@ -2944,13 +3025,14 @@ function toggleSubs(){
 }
 // ── Undo ──
 function saveUndo(){
-  undoStack.push({players:cloneP(players),arrows:cloneA(arrows)});
+  undoStack.push({players:cloneP(players),arrows:cloneA(arrows),penStrokes:JSON.parse(JSON.stringify(penStrokes))});
   if(undoStack.length>30) undoStack.shift();
 }
 function undo(){
   if(undoStack.length===0) return;
   const s=undoStack.pop();
   players=s.players; arrows=s.arrows;
+  penStrokes=s.penStrokes||[];
   render();
 }
 function clearArrows(){saveUndo();arrows=[];render();}
@@ -3051,7 +3133,8 @@ function addFrame(){
       Object.entries(playerArrowMap).map(([id,v])=>[id,{arrow:cloneA([v.arrow])[0], isPass:v.isPass}])
     ),
     memo: '',
-    miscs: JSON.parse(JSON.stringify(miscs))
+    miscs: JSON.parse(JSON.stringify(miscs)),
+    penStrokes: JSON.parse(JSON.stringify(penStrokes))
   };
   if(currentFrame>=0&&currentFrame<frames.length-1){ frames.splice(currentFrame+1,0,f); currentFrame++; }
   else{ frames.push(f); currentFrame=frames.length-1; }
@@ -3090,8 +3173,9 @@ function addFrame(){
     if(best) best.hasBall=false;
   });
 
-  // 4c. Clear arrows
+  // 4c. Clear arrows and pen strokes
   arrows = [];
+  penStrokes = [];
 
   // 4d. 重なり解消: 矢印で移動してきた選手を矢印上で遡って重ならない位置に
   const OVERLAP_R = 36;
@@ -3179,6 +3263,7 @@ function loadFrame(idx){
   currentFrame=idx;const f=frames[idx];
   players=cloneP(f.players);arrows=cloneA(f.arrows);
   miscs=f.miscs?JSON.parse(JSON.stringify(f.miscs)):[];
+  penStrokes=f.penStrokes?JSON.parse(JSON.stringify(f.penStrokes)):[];
   render();updateFrameUI();
 }
 function loadFrameNoArrows(idx){
@@ -4148,7 +4233,7 @@ async function startExport(){
 
   const blob = new Blob(chunks, {type: mime});
   const url  = URL.createObjectURL(blob);
-  const fileName = `basketball-play.${ext}`;
+  const fileName = `${_videoExportName || 'basketball-play'}.${ext}`;
 
   // モバイル: Share API
   if(navigator.share && navigator.canShare && (device.isiOS || device.isAndroid)){
@@ -4318,7 +4403,7 @@ async function exportAsGif(spd, settings, W, courtH, oc, octx){
       if(done) return;
       done = true; clearTimeout(timeout);
       const url = URL.createObjectURL(blob);
-      const fileName = 'basketball-play.gif';
+      const fileName = (_videoExportName || 'basketball-play') + '.gif';
       // Show preview + share UI
       const md = document.querySelector('#export-modal .md');
       md.innerHTML = '<h2>\u2705 GIF\u5b8c\u4e86</h2>'
@@ -4407,7 +4492,7 @@ async function exportFramesAsZip(spd, settings, W, courtH, oc, octx){
   const zipBlob = await zip.generateAsync({type:'blob', compression:'DEFLATE'});
   const url = URL.createObjectURL(zipBlob);
   const a = document.createElement('a');
-  a.href=url; a.download='basketball-play-frames.zip';
+  a.href=url; a.download=(_videoExportName || 'basketball-play') + '-frames.zip';
   document.body.appendChild(a); a.click();
   setTimeout(()=>{URL.revokeObjectURL(url);a.remove();},3000);
 
@@ -4740,10 +4825,40 @@ function updatePlaysUI(){
   const cf = document.getElementById('count-plays-full');
   const dh = document.getElementById('count-drills-half');
   const df = document.getElementById('count-drills-full');
+  const cpb = document.getElementById('count-playbooks');
   if(ch) ch.textContent = plays.filter(p=>(p.courtMode||'half')==='half').length || '';
   if(cf) cf.textContent = plays.filter(p=>(p.courtMode||'half')==='full').length || '';
   if(dh) dh.textContent = drills.filter(p=>(p.courtMode||'half')==='half').length || '';
   if(df) df.textContent = drills.filter(p=>(p.courtMode||'half')==='full').length || '';
+  if(cpb) cpb.textContent = playbooks.length || '';
+
+  // Playbooks tab — special rendering
+  if(_playsTab === 'playbooks'){
+    const pbFiltered = q ? playbooks.filter(p=>p.name.toLowerCase().includes(q)) : playbooks;
+    if(pbFiltered.length === 0){
+      list.innerHTML = '<div style="color:var(--text-dim);font-size:13px;padding:20px;text-align:center">📕 プレーブックはまだありません<br><span style="font-size:11px">下部の📄ボタンからPDFをPLAYSに保存できます</span></div>';
+      return;
+    }
+    const grid = document.createElement('div');
+    grid.className = 'plays-grid';
+    pbFiltered.forEach(pb => {
+      const card = document.createElement('div');
+      card.className = 'pc';
+      const thumbHtml = pb.thumbnail
+        ? '<img class="pc-thumb" src="'+pb.thumbnail+'" alt="" loading="lazy">'
+        : '<div class="pc-thumb-empty">📕</div>';
+      const fCount = pb.frames ? pb.frames.length : 0;
+      const dateStr = pb.createdAt ? new Date(pb.createdAt).toLocaleDateString('ja-JP') : '';
+      card.innerHTML = thumbHtml +
+        '<div class="pc-info"><div class="pn">'+pb.name+'</div>' +
+        '<div class="pm">'+fCount+' フレーム'+( dateStr ? ' • '+dateStr : '')+'</div></div>' +
+        '<button class="pd" onclick="event.stopPropagation();deletePlaybook('+pb.id+')" title="削除">✕</button>';
+      card.onclick = () => showPlaybookActions(pb.id);
+      grid.appendChild(card);
+    });
+    list.appendChild(grid);
+    return;
+  }
 
   if(courtFiltered.length===0&&currentFolders().length===0){
     const courtLabel = _isHalfTab() ? 'ハーフコート' : 'フルコート';
@@ -5143,6 +5258,174 @@ function _frdUp(e){
 }
 
 // ═══════════════════════════════════════
+//  PEN TOOL (free drawing)
+// ═══════════════════════════════════════
+let penStrokes = []; // [{pts:[{x,y},...], color, width}]
+let _penDrawing = false;
+let _penCurrent = [];
+
+function drawPenStrokes(){
+  penStrokes.forEach(s => {
+    if(!s.pts || s.pts.length < 2) return;
+    ctx.save();
+    ctx.strokeStyle = s.color || drawColor;
+    ctx.lineWidth = s.width || 2;
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.globalAlpha = 0.85;
+    ctx.beginPath();
+    ctx.moveTo(s.pts[0].x, s.pts[0].y);
+    for(let i=1;i<s.pts.length;i++) ctx.lineTo(s.pts[i].x, s.pts[i].y);
+    ctx.stroke();
+    ctx.restore();
+  });
+  // Current stroke being drawn
+  if(_penDrawing && _penCurrent.length >= 2){
+    ctx.save();
+    ctx.strokeStyle = drawColor;
+    ctx.lineWidth = 2;
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.globalAlpha = 0.85;
+    ctx.beginPath();
+    ctx.moveTo(_penCurrent[0].x, _penCurrent[0].y);
+    for(let i=1;i<_penCurrent.length;i++) ctx.lineTo(_penCurrent[i].x, _penCurrent[i].y);
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
+function clearPenStrokes(){
+  if(penStrokes.length === 0) return;
+  penStrokes = [];
+  render();
+}
+
+// ═══════════════════════════════════════
+//  VIDEO EXPORT NAME MODAL
+// ═══════════════════════════════════════
+let _videoExportName = '';
+function showVideoExportModal(){
+  if(!isPro()){ showUpgradeModal(); return; }
+  if(frames.length<2){alert('2フレーム以上が必要です。');return;}
+  const playName = currentPlayId ? (plays.find(p=>p.id===currentPlayId)||drills.find(p=>p.id===currentPlayId)||{}).name || '' : '';
+  document.getElementById('video-name-input').value = playName;
+  document.getElementById('video-name-modal').classList.add('show');
+  setTimeout(()=>document.getElementById('video-name-input').focus(),50);
+}
+function closeVideoNameModal(){
+  document.getElementById('video-name-modal').classList.remove('show');
+}
+function confirmVideoExport(){
+  _videoExportName = document.getElementById('video-name-input').value.trim() || 'basketball-play';
+  closeVideoNameModal();
+  exportVideo();
+}
+
+// ═══════════════════════════════════════
+//  PDF CHOICE MODAL
+// ═══════════════════════════════════════
+let _pdfExportName = '';
+function showPDFChoiceModal(){
+  if(frames.length === 0){ alert('フレームがありません。'); return; }
+  const playName = currentPlayId ? (plays.find(p=>p.id===currentPlayId)||drills.find(p=>p.id===currentPlayId)||{}).name || '' : '';
+  document.getElementById('pdf-name-input').value = playName;
+  document.getElementById('pdf-choice-modal').classList.add('show');
+  setTimeout(()=>document.getElementById('pdf-name-input').focus(),50);
+}
+function closePDFChoiceModal(){
+  document.getElementById('pdf-choice-modal').classList.remove('show');
+}
+function confirmPDFExport(){
+  _pdfExportName = document.getElementById('pdf-name-input').value.trim() || 'draw-iq';
+  closePDFChoiceModal();
+  exportPDF();
+}
+function confirmPDFSaveToPlays(){
+  const name = document.getElementById('pdf-name-input').value.trim() || '無名のプレーブック';
+  closePDFChoiceModal();
+  savePDFPlaybook(name);
+}
+
+// ═══════════════════════════════════════
+//  PDF PLAYBOOK (save to PLAYS)
+// ═══════════════════════════════════════
+let playbooks = []; // {id, name, frames:cloneFrames, courtMode, createdAt, type:'playbook'}
+
+async function savePDFPlaybook(name){
+  if(frames.length === 0){ alert('フレームがありません。'); return; }
+  // Generate PDF as data URL for storage
+  const entry = {
+    id: Date.now(),
+    name: name,
+    type: 'playbook',
+    courtMode: courtMode,
+    frames: cloneFrames(frames),
+    createdAt: new Date().toISOString(),
+    playName: currentPlayId ? (plays.find(p=>p.id===currentPlayId)||drills.find(p=>p.id===currentPlayId)||{}).name || name : name
+  };
+  // Generate a thumbnail from first frame
+  if(frames.length > 0){
+    try { entry.thumbnail = generatePlayThumb(frames[0], courtMode); } catch(e){}
+  }
+  playbooks.push(entry);
+  syncToCloud();
+  showSyncBadge('📕 プレーブック保存：' + name);
+  // Switch to playbooks tab
+  openPlaysScreen();
+  setTimeout(()=>switchPlaysTab('playbooks'), 100);
+}
+
+function deletePlaybook(id){
+  if(!confirm('プレーブックを削除しますか？')) return;
+  playbooks = playbooks.filter(p => p.id !== id);
+  updatePlaysUI();
+  syncToCloud();
+}
+
+function showPlaybookActions(id){
+  const pb = playbooks.find(p => p.id === id);
+  if(!pb) return;
+  const action = confirm('「'+pb.name+'」\n\n[OK] → PDFとして出力\n[キャンセル] → 作戦板で開く');
+  if(action){
+    exportPlaybookAsPDF(id);
+  } else {
+    loadPlaybookToBoard(id);
+  }
+}
+
+function loadPlaybookToBoard(id){
+  const pb = playbooks.find(p => p.id === id);
+  if(!pb) return;
+  if(isPlaying) stopPlay();
+  if(pb.courtMode && pb.courtMode !== courtMode) setCourt(pb.courtMode);
+  frames = cloneFrames(pb.frames);
+  currentFrame = 0;
+  currentPlayId = null;
+  if(frames.length > 0) loadFrame(0);
+  updateFrameUI();
+  closePlaysScreen();
+}
+
+async function exportPlaybookAsPDF(id){
+  const pb = playbooks.find(p => p.id === id);
+  if(!pb) return;
+  // Temporarily load playbook frames and export
+  const savedFrames = frames, savedCurrent = currentFrame, savedPlayers2 = cloneP(players), savedArrows2 = cloneA(arrows);
+  const savedMode = courtMode;
+  if(pb.courtMode) courtMode = pb.courtMode;
+  frames = cloneFrames(pb.frames);
+  currentFrame = 0;
+  _pdfExportName = pb.name || 'playbook';
+  await exportPDF();
+  // Restore
+  courtMode = savedMode;
+  frames = savedFrames;
+  currentFrame = savedCurrent;
+  players = savedPlayers2;
+  arrows = savedArrows2;
+  resize(); render(); updateFrameUI();
+}
+
+// ═══════════════════════════════════════
 //  HOW-TO
 // ═══════════════════════════════════════
 function showHowTo(){document.getElementById('howto-modal').classList.add('show');}
@@ -5446,14 +5729,15 @@ async function exportPDF(){
     pdf.addImage(pageImg, 'JPEG', 0, 0, 210, 297);
   }
 
-  const fileName = playName || 'draw-iq';
+  const fileName = _pdfExportName || playName || 'draw-iq';
+  _pdfExportName = ''; // reset
   pdf.save(fileName + '.pdf');
 }
 
 // ＋新規 — 確認なしで完全リセット
 function newPlay(){
   if(isPlaying)stopPlay();
-  frames=[];currentFrame=-1;currentPlayId=null;arrows=[];
+  frames=[];currentFrame=-1;currentPlayId=null;arrows=[];penStrokes=[];
   freshPlayers();
   render();updateFrameUI();updatePlaysUI();
 }
@@ -5504,6 +5788,7 @@ initFrameReorder();
         if(local.playFoldersFull && local.playFoldersFull.length > 0) playFoldersFull = local.playFoldersFull;
         if(local.drillFoldersHalf && local.drillFoldersHalf.length > 0) drillFoldersHalf = local.drillFoldersHalf;
         if(local.drillFoldersFull && local.drillFoldersFull.length > 0) drillFoldersFull = local.drillFoldersFull;
+        if(local.playbooks && local.playbooks.length > 0) playbooks = local.playbooks;
         if(playFoldersHalf.length===0 && playFolders.length>0) playFoldersHalf = playFolders;
         if(drillFoldersHalf.length===0 && drillFolders.length>0) drillFoldersHalf = drillFolders;
         updatePlaysUI();
