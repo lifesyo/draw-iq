@@ -1065,9 +1065,24 @@ function allFolders(){ return {playFoldersHalf, playFoldersFull, drillFoldersHal
 let currentUser = null; // Firebase user object
 
 // ── Plan / Subscription ──
-const STRIPE_PK = 'pk_test_51T8xCmLy8RWhsD12mO9u5BjeGNDtpfLKphnus8UKNNGFTCVEpWGJihbKcC2y2QrmxdPSUZUFe1rweJXPMCrGDVBv00siig9b5M';
-const PRICE_MONTHLY = 'price_1T8xK2Ly8RWhsD12V1CvBv4s';
-const PRICE_YEARLY  = 'price_1T8xMeLy8RWhsD12PGsABKPq';
+// ── Plan / Subscription ──
+// ★ 本番リリース時: STRIPE_MODE を 'live' に変更し、LIVE側のキー・Price IDを設定
+const STRIPE_MODE = 'live'; // 'test' | 'live'
+const STRIPE_KEYS = {
+  test: {
+    pk: 'pk_test_51T8xCmLy8RWhsD12mO9u5BjeGNDtpfLKphnus8UKNNGFTCVEpWGJihbKcC2y2QrmxdPSUZUFe1rweJXPMCrGDVBv00siig9b5M',
+    priceMonthly: 'price_1T8xK2Ly8RWhsD12V1CvBv4s',
+    priceYearly:  'price_1T8xMeLy8RWhsD12PGsABKPq'
+  },
+  live: {
+    pk: 'pk_live_51T8xCaPwXDWLFj6ilfMxKIsPNabhRK2istq1LtNqhNVp6HlKsIJb782i3bxWqMRuMQyC3OX9eXcOdDZlwGs9ePAb00RK36S9R2',
+    priceMonthly: 'price_1TE8E9PwXDWLFj6iEYrFkbYS',
+    priceYearly:  'price_1TE8E8PwXDWLFj6ijSEweIS3'
+  }
+};
+const STRIPE_PK     = STRIPE_KEYS[STRIPE_MODE].pk;
+const PRICE_MONTHLY = STRIPE_KEYS[STRIPE_MODE].priceMonthly;
+const PRICE_YEARLY  = STRIPE_KEYS[STRIPE_MODE].priceYearly;
 const FREE_MAX_PLAYS  = 5;
 const FREE_MAX_FRAMES = 3;
 let userPlan = 'free'; // 'free' | 'pro'
@@ -5742,10 +5757,10 @@ function newPlay(){
 // 決済結果チェック
 (function(){
   const params = new URLSearchParams(window.location.search);
-  if(params.get('payment')==='success'){
+  if(params.get('checkout')==='success' || params.get('payment')==='success'){
     setTimeout(()=>{ alert('🎉 Proプランへのアップグレードが完了しました！'); checkSubscription(); }, 500);
     window.history.replaceState({}, '', window.location.pathname);
-  } else if(params.get('payment')==='cancelled'){
+  } else if(params.get('checkout')==='cancel' || params.get('payment')==='cancelled'){
     window.history.replaceState({}, '', window.location.pathname);
   }
 })();
@@ -5820,8 +5835,56 @@ initFrameReorder();
     <div id="manage-sub-link" style="display:none;text-align:center;margin-top:8px">
       <a href="#" onclick="openCustomerPortal();return false" style="color:var(--accent);font-size:12px">サブスクリプションを管理</a>
     </div>
+    <div style="text-align:center;margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">
+      <a href="#" onclick="showLegalModal();return false" style="color:var(--text-dim);font-size:11px;text-decoration:none;opacity:0.7">特定商取引法に基づく表記</a>
+      <span style="color:var(--text-dim);font-size:11px;opacity:0.4;margin:0 6px">|</span>
+      <a href="#" onclick="showPrivacyModal();return false" style="color:var(--text-dim);font-size:11px;text-decoration:none;opacity:0.7">プライバシーポリシー</a>
+    </div>
   </div>
 </div>
+
+<!-- 特定商取引法に基づく表記 Modal -->
+<div id="legal-modal" style="display:none;position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,0.7);backdrop-filter:blur(4px);align-items:center;justify-content:center;padding:16px">
+  <div style="background:var(--card);border-radius:16px;max-width:480px;width:100%;max-height:80vh;overflow-y:auto;padding:28px 24px;position:relative;border:1px solid var(--border)">
+    <button onclick="closeLegalModal()" style="position:absolute;top:12px;right:14px;background:none;border:none;font-size:20px;color:var(--text-dim);cursor:pointer">&times;</button>
+    <h2 style="margin:0 0 16px;font-size:18px;color:var(--text)">特定商取引法に基づく表記</h2>
+    <table style="width:100%;font-size:13px;color:var(--text);border-collapse:collapse">
+      <tr style="border-bottom:1px solid var(--border)"><td style="padding:10px 8px;font-weight:600;white-space:nowrap;vertical-align:top;color:var(--text-dim)">販売事業者</td><td style="padding:10px 8px">樋口 翔生</td></tr>
+      <tr style="border-bottom:1px solid var(--border)"><td style="padding:10px 8px;font-weight:600;white-space:nowrap;vertical-align:top;color:var(--text-dim)">運営責任者</td><td style="padding:10px 8px">樋口 翔生</td></tr>
+      <tr style="border-bottom:1px solid var(--border)"><td style="padding:10px 8px;font-weight:600;white-space:nowrap;vertical-align:top;color:var(--text-dim)">所在地</td><td style="padding:10px 8px">請求があった場合に遅滞なく開示いたします</td></tr>
+      <tr style="border-bottom:1px solid var(--border)"><td style="padding:10px 8px;font-weight:600;white-space:nowrap;vertical-align:top;color:var(--text-dim)">連絡先</td><td style="padding:10px 8px">lifesyo4030@gmail.com</td></tr>
+      <tr style="border-bottom:1px solid var(--border)"><td style="padding:10px 8px;font-weight:600;white-space:nowrap;vertical-align:top;color:var(--text-dim)">販売価格</td><td style="padding:10px 8px">月額プラン: ¥500（税込）/ 月<br>年額プラン: ¥5,000（税込）/ 年</td></tr>
+      <tr style="border-bottom:1px solid var(--border)"><td style="padding:10px 8px;font-weight:600;white-space:nowrap;vertical-align:top;color:var(--text-dim)">支払方法</td><td style="padding:10px 8px">クレジットカード（Stripe経由）</td></tr>
+      <tr style="border-bottom:1px solid var(--border)"><td style="padding:10px 8px;font-weight:600;white-space:nowrap;vertical-align:top;color:var(--text-dim)">支払時期</td><td style="padding:10px 8px">月額: 毎月自動課金<br>年額: 毎年自動課金<br>初回は購入時に即時決済</td></tr>
+      <tr style="border-bottom:1px solid var(--border)"><td style="padding:10px 8px;font-weight:600;white-space:nowrap;vertical-align:top;color:var(--text-dim)">サービス提供時期</td><td style="padding:10px 8px">決済完了後、即時利用可能</td></tr>
+      <tr style="border-bottom:1px solid var(--border)"><td style="padding:10px 8px;font-weight:600;white-space:nowrap;vertical-align:top;color:var(--text-dim)">解約・返金</td><td style="padding:10px 8px">アプリ内「サブスクリプションを管理」またはStripeカスタマーポータルからいつでも解約可能。解約後も契約期間の終了まで利用可能。日割り返金には対応しておりません。</td></tr>
+      <tr><td style="padding:10px 8px;font-weight:600;white-space:nowrap;vertical-align:top;color:var(--text-dim)">動作環境</td><td style="padding:10px 8px">モダンブラウザ（Chrome, Safari, Edge, Firefox 最新版）。インターネット接続が必要です。</td></tr>
+    </table>
+  </div>
+</div>
+
+<!-- プライバシーポリシー Modal -->
+<div id="privacy-modal" style="display:none;position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,0.7);backdrop-filter:blur(4px);align-items:center;justify-content:center;padding:16px">
+  <div style="background:var(--card);border-radius:16px;max-width:480px;width:100%;max-height:80vh;overflow-y:auto;padding:28px 24px;position:relative;border:1px solid var(--border)">
+    <button onclick="closePrivacyModal()" style="position:absolute;top:12px;right:14px;background:none;border:none;font-size:20px;color:var(--text-dim);cursor:pointer">&times;</button>
+    <h2 style="margin:0 0 16px;font-size:18px;color:var(--text)">プライバシーポリシー</h2>
+    <div style="font-size:13px;color:var(--text);line-height:1.7">
+      <p style="margin:0 0 12px"><b>1. 収集する情報</b><br>本サービスでは、Googleアカウント認証を通じて以下の情報を取得します：メールアドレス、表示名、プロフィール画像URL。また、サブスクリプション決済のためStripeを通じてお支払い情報を処理します（カード情報はStripeが管理し、当方では保持しません）。</p>
+      <p style="margin:0 0 12px"><b>2. 利用目的</b><br>取得した情報は、ユーザー認証、データ同期、サブスクリプション管理の目的でのみ使用します。</p>
+      <p style="margin:0 0 12px"><b>3. 第三者提供</b><br>法令に基づく場合を除き、お客様の個人情報を第三者に提供することはありません。</p>
+      <p style="margin:0 0 12px"><b>4. データの保管</b><br>ユーザーデータはGoogle Firebase（Firestore）に保存されます。データはGoogleのセキュリティ基準に準じて保護されます。</p>
+      <p style="margin:0 0 12px"><b>5. データの削除</b><br>アカウント削除をご希望の場合は、お問い合わせください。保存されたデータを削除いたします。</p>
+      <p style="margin:0"><b>6. お問い合わせ</b><br>lifesyo4030@gmail.com</p>
+    </div>
+  </div>
+</div>
+
+<script>
+function showLegalModal(){ document.getElementById('legal-modal').style.display='flex'; }
+function closeLegalModal(){ document.getElementById('legal-modal').style.display='none'; }
+function showPrivacyModal(){ document.getElementById('privacy-modal').style.display='flex'; }
+function closePrivacyModal(){ document.getElementById('privacy-modal').style.display='none'; }
+</script>
 </body>
 </html>
 
