@@ -1089,9 +1089,13 @@ let userPlan = 'free'; // 'free' | 'pro'
 let stripeCustomerId = null;
 
 async function checkSubscription(){
-  if(!currentUser) { userPlan='free'; updatePlanUI(); return; }
+  if(!currentUser) {
+    // Offline: restore Pro from localStorage if owner previously logged in
+    if(!navigator.onLine && localStorage.getItem('diq_owner_pro')==='1'){ userPlan='pro'; } else { userPlan='free'; }
+    updatePlanUI(); return;
+  }
   const OWNER_UIDS = ['tmpnW0YjuuUf1KbNPTC9H6ffnRG2'];
-  if(OWNER_UIDS.includes(currentUser.uid)){ userPlan='pro'; updatePlanUI(); return; }
+  if(OWNER_UIDS.includes(currentUser.uid)){ userPlan='pro'; localStorage.setItem('diq_owner_pro','1'); updatePlanUI(); return; }
   try{
     const r = await fetch('/api/check-subscription?uid=' + currentUser.uid);
     const d = await r.json();
