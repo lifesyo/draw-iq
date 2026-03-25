@@ -1091,11 +1091,13 @@ let stripeCustomerId = null;
 async function checkSubscription(){
   if(!currentUser) {
     // No login: restore Pro from localStorage if owner previously logged in
-    if(localStorage.getItem('diq_owner_pro')==='1'){ userPlan='pro'; } else { userPlan='free'; }
+    const flag = localStorage.getItem('diq_owner_pro');
+    if(flag==='1'){ userPlan='pro'; } else { userPlan='free'; }
+    console.log('[DIQ-DEBUG] no currentUser, flag='+flag+', plan='+userPlan+', online='+navigator.onLine);
     updatePlanUI(); return;
   }
   const OWNER_UIDS = ['tmpnW0YjuuUf1KbNPTC9H6ffnRG2'];
-  if(OWNER_UIDS.includes(currentUser.uid)){ userPlan='pro'; localStorage.setItem('diq_owner_pro','1'); updatePlanUI(); return; }
+  if(OWNER_UIDS.includes(currentUser.uid)){ userPlan='pro'; localStorage.setItem('diq_owner_pro','1'); console.log('[DIQ-DEBUG] owner matched, set pro'); updatePlanUI(); return; }
   try{
     const r = await fetch('/api/check-subscription?uid=' + currentUser.uid);
     const d = await r.json();
@@ -1208,6 +1210,7 @@ window.onFbAuthChange = async function(user){
     avatar.style.display = 'none';
     userPlan = 'free'; stripeCustomerId = null;
     if(localStorage.getItem('diq_owner_pro')==='1'){ userPlan='pro'; }
+    console.log('[DIQ-DEBUG] else block (no user), flag='+localStorage.getItem('diq_owner_pro')+', plan='+userPlan);
     updatePlanUI();
     // 未ログインでもIDBからデータ復元
     if(window._idbLoad){
