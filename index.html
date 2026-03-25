@@ -34,7 +34,7 @@
 if('serviceWorker' in navigator){
   // SW本体をBlobで生成・登録
   const swCode = `
-    const CACHE_NAME = 'draw-iq-v6';
+    const CACHE_NAME = 'draw-iq-v7';
     const PRECACHE = [
       './',
       './index.html'
@@ -5781,6 +5781,8 @@ function newPlay(){
 }
 
 // ── Init ──
+// localStorageからの初期Pro判定をバッジに反映
+updatePlanUI();
 // 決済結果チェック
 let _checkoutSuccess = false;
 (function(){
