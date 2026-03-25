@@ -1179,6 +1179,22 @@ window.onFbAuthChange = async function(user){
     // サブスク確認（オフラインなら前回の状態を維持）
     if(navigator.onLine){
       await checkSubscription();
+      // Checkout成功直後: Webhookが未処理の場合リトライ
+      if(_checkoutSuccess && userPlan !== 'pro'){
+        for(let i = 0; i < 5; i++){
+          await new Promise(r => setTimeout(r, 2000));
+          await checkSubscription();
+          if(userPlan === 'pro') break;
+        }
+      }
+      if(_checkoutSuccess){
+        _checkoutSuccess = false;
+        if(userPlan === 'pro'){
+          alert('🎉 Proプランへのアップグレードが完了しました！');
+        } else {
+          alert('決済は完了しましたが、反映に時間がかかる場合があります。しばらくしてからページを再読み込みしてください。');
+        }
+      }
     }
   } else {
     btn.classList.remove('signed-in');
@@ -5755,10 +5771,11 @@ function newPlay(){
 
 // ── Init ──
 // 決済結果チェック
+let _checkoutSuccess = false;
 (function(){
   const params = new URLSearchParams(window.location.search);
   if(params.get('checkout')==='success' || params.get('payment')==='success'){
-    setTimeout(()=>{ alert('🎉 Proプランへのアップグレードが完了しました！'); checkSubscription(); }, 500);
+    _checkoutSuccess = true;
     window.history.replaceState({}, '', window.location.pathname);
   } else if(params.get('checkout')==='cancel' || params.get('payment')==='cancelled'){
     window.history.replaceState({}, '', window.location.pathname);
@@ -5852,7 +5869,7 @@ initFrameReorder();
       <tr style="border-bottom:1px solid var(--border)"><td style="padding:10px 8px;font-weight:600;white-space:nowrap;vertical-align:top;color:var(--text-dim)">販売事業者</td><td style="padding:10px 8px">樋口 翔生</td></tr>
       <tr style="border-bottom:1px solid var(--border)"><td style="padding:10px 8px;font-weight:600;white-space:nowrap;vertical-align:top;color:var(--text-dim)">運営責任者</td><td style="padding:10px 8px">樋口 翔生</td></tr>
       <tr style="border-bottom:1px solid var(--border)"><td style="padding:10px 8px;font-weight:600;white-space:nowrap;vertical-align:top;color:var(--text-dim)">所在地</td><td style="padding:10px 8px">請求があった場合に遅滞なく開示いたします</td></tr>
-      <tr style="border-bottom:1px solid var(--border)"><td style="padding:10px 8px;font-weight:600;white-space:nowrap;vertical-align:top;color:var(--text-dim)">連絡先</td><td style="padding:10px 8px">lifesyo4030@gmail.com</td></tr>
+      <tr style="border-bottom:1px solid var(--border)"><td style="padding:10px 8px;font-weight:600;white-space:nowrap;vertical-align:top;color:var(--text-dim)">連絡先</td><td style="padding:10px 8px"><a href="/cdn-cgi/l/email-protection" class="__cf_email__" data-cfemail="3854515e5d4b41570c080b08785f55595154165b5755">[email&#160;protected]</a></td></tr>
       <tr style="border-bottom:1px solid var(--border)"><td style="padding:10px 8px;font-weight:600;white-space:nowrap;vertical-align:top;color:var(--text-dim)">販売価格</td><td style="padding:10px 8px">月額プラン: ¥500（税込）/ 月<br>年額プラン: ¥5,000（税込）/ 年</td></tr>
       <tr style="border-bottom:1px solid var(--border)"><td style="padding:10px 8px;font-weight:600;white-space:nowrap;vertical-align:top;color:var(--text-dim)">支払方法</td><td style="padding:10px 8px">クレジットカード（Stripe経由）</td></tr>
       <tr style="border-bottom:1px solid var(--border)"><td style="padding:10px 8px;font-weight:600;white-space:nowrap;vertical-align:top;color:var(--text-dim)">支払時期</td><td style="padding:10px 8px">月額: 毎月自動課金<br>年額: 毎年自動課金<br>初回は購入時に即時決済</td></tr>
@@ -5874,18 +5891,10 @@ initFrameReorder();
       <p style="margin:0 0 12px"><b>3. 第三者提供</b><br>法令に基づく場合を除き、お客様の個人情報を第三者に提供することはありません。</p>
       <p style="margin:0 0 12px"><b>4. データの保管</b><br>ユーザーデータはGoogle Firebase（Firestore）に保存されます。データはGoogleのセキュリティ基準に準じて保護されます。</p>
       <p style="margin:0 0 12px"><b>5. データの削除</b><br>アカウント削除をご希望の場合は、お問い合わせください。保存されたデータを削除いたします。</p>
-      <p style="margin:0"><b>6. お問い合わせ</b><br>lifesyo4030@gmail.com</p>
+      <p style="margin:0"><b>6. お問い合わせ</b><br><a href="/cdn-cgi/l/email-protection" class="__cf_email__" data-cfemail="d6babfb0b3a5afb9e2e6e5e696b1bbb7bfbaf8b5b9bb">[email&#160;protected]</a></p>
     </div>
   </div>
 </div>
 
-<script>
-function showLegalModal(){ document.getElementById('legal-modal').style.display='flex'; }
-function closeLegalModal(){ document.getElementById('legal-modal').style.display='none'; }
-function showPrivacyModal(){ document.getElementById('privacy-modal').style.display='flex'; }
-function closePrivacyModal(){ document.getElementById('privacy-modal').style.display='none'; }
-</script>
-</body>
-</html>
-
-
+<script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script>
+function showLegalModal(){ document.getEle
