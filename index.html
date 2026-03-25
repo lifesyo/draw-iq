@@ -1090,6 +1090,8 @@ let stripeCustomerId = null;
 
 async function checkSubscription(){
   if(!currentUser) { userPlan='free'; updatePlanUI(); return; }
+  const OWNER_UIDS = ['tmpnW0YjuuUf1KbNPTC9H6ffnRG2'];
+  if(OWNER_UIDS.includes(currentUser.uid)){ userPlan='pro'; updatePlanUI(); return; }
   try{
     const r = await fetch('/api/check-subscription?uid=' + currentUser.uid);
     const d = await r.json();
