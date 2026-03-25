@@ -4059,7 +4059,39 @@ function getExportSettings(quality, device){
 
 // 書き出し専用レンダリング
 // メインcanvasを一時的に書き出し解像度に変更してレンダリングし、結果をexpCanvasにコピー
-function renderForExport(expCanvas, expCtx, fromF, toF, t){
+// 書き出し用：矢印の順次表示タイミングを構築する
+function buildExportArrowTimings(fromF){
+  if(!fromF.playerArrowMap || Object.keys(fromF.playerArrowMap).length === 0){
+    fromF.playerArrowMap = buildPlayerArrowMap(fromF);
+  }
+  const pam = fromF.playerArrowMap || {};
+  const entries = Object.entries(pam);
+  function priority(entry){
+    const [id, {arrow, isPass}] = entry;
+    if(isPass) return 2;
+    if(arrow.atype === 'screen') return 0;
+    return 1;
+  }
+  const sorted = [...entries].sort((a,b) => priority(a) - priority(b));
+  const _isBlackH = a => (!a.color || a.color === '#111111' || a.color === '#111');
+  const _pamArrowKeys = new Set(Object.values(pam).map(v => {
+    const a = v.arrow;
+    return a.atype + ':' + a.pts[0].x.toFixed(1) + ',' + a.pts[0].y.toFixed(1) + '-' + a.pts[a.pts.length-1].x.toFixed(1) + ',' + a.pts[a.pts.length-1].y.toFixed(1);
+  }));
+  (fromF.arrows||[]).filter(a => {
+    if(!_isBlackH(a)) return false;
+    const key = a.atype + ':' + a.pts[0].x.toFixed(1) + ',' + a.pts[0].y.toFixed(1) + '-' + a.pts[a.pts.length-1].x.toFixed(1) + ',' + a.pts[a.pts.length-1].y.toFixed(1);
+    return !_pamArrowKeys.has(key);
+  }).forEach(a => {
+    const isPass = (a.atype === 'pass' || a.atype === 'handoff' || a.atype === 'shot');
+    sorted.push(['_orphan_' + Math.random(), {arrow: a, isPass}]);
+  });
+  return sorted.map(([playerId, {arrow, isPass}], i) => ({
+    playerId, arrow, isPass, index: i
+  }));
+}
+
+function renderForExport(expCanvas, expCtx, fromF, toF, t, steps=null){
   const {W, H, courtH, PAD, canvasW, canvasH} = CS();
   const vidW = expCanvas.width;
   const vidH = expCanvas.height;
@@ -4087,7 +4119,11 @@ function renderForExport(expCanvas, expCtx, fromF, toF, t){
 
   // レンダリング（renderはPADのtranslateを内部で行う）
   if(fromF && toF){
-    render(fromF, toF, t);
+    if(steps){
+      render(fromF, toF, 0, 0, steps);
+    } else {
+      render(fromF, toF, t);
+    }
   } else {
     render();
   }
@@ -4203,21 +4239,57 @@ async function startExport(){
   let framesDone = 0;
 
   async function animateFrames(){
+    const ARROW_EACH_MS = 700; // 各矢印の表示間隔（プレビューと同じ）
+    const PAUSE_MS = 300;      // 矢印表示後の間
+
     for(let fi=0; fi<frames.length-1; fi++){
       if(exportCancelled) break;
       const from=frames[fi], to=frames[fi+1];
-      const totalTicks = Math.ceil(spd / 1000 * settings.fps);
-      for(let tick=0; tick<=totalTicks; tick++){
-        if(exportCancelled) break;
-        const t = Math.min(1, tick/totalTicks);
-        renderForExport(oc, octx, from, to, t);
-        await new Promise(r=>setTimeout(r, 1000/settings.fps));
+      const arrowTimings = buildExportArrowTimings(from);
+      const arrowCount = arrowTimings.length;
+
+      if(arrowCount === 0){
+        // 矢印がない場合は旧動作（単純な移動）
+        const totalTicks = Math.ceil(spd / 1000 * settings.fps);
+        for(let tick=0; tick<=totalTicks; tick++){
+          if(exportCancelled) break;
+          const t = Math.min(1, tick/totalTicks);
+          renderForExport(oc, octx, from, to, t);
+          await new Promise(r=>setTimeout(r, 1000/settings.fps));
+        }
+      } else {
+        // 矢印フェーズ + 移動フェーズ（プレビューと同じタイムライン）
+        const arrowPhaseDur = arrowCount * ARROW_EACH_MS;
+        const moveStartMs = arrowPhaseDur + PAUSE_MS;
+        const moveDurMs = spd;
+        const totalDurMs = moveStartMs + moveDurMs;
+        const totalTicks = Math.ceil(totalDurMs / 1000 * settings.fps);
+
+        for(let tick=0; tick<=totalTicks; tick++){
+          if(exportCancelled) break;
+          const elapsedMs = (tick / settings.fps) * 1000;
+          const moveT = elapsedMs >= moveStartMs ? Math.min(1, (elapsedMs - moveStartMs) / moveDurMs) : 0;
+          const steps = arrowTimings.map(at => ({
+            playerId: at.playerId,
+            arrow: at.arrow,
+            isPass: at.isPass,
+            t: moveT,
+            showArrow: elapsedMs >= at.index * ARROW_EACH_MS,
+            arrowProgress: elapsedMs >= at.index * ARROW_EACH_MS ? Math.min(1, (elapsedMs - at.index * ARROW_EACH_MS) / ARROW_EACH_MS) : 0
+          }));
+          renderForExport(oc, octx, from, to, 0, steps);
+          await new Promise(r=>setTimeout(r, 1000/settings.fps));
+        }
       }
       // Hold between frames 0.5s
       if(!exportCancelled){
         const holdTicks = Math.ceil(0.5 * settings.fps);
+        const holdSteps = arrowCount > 0 ? arrowTimings.map(at => ({
+          playerId: at.playerId, arrow: at.arrow, isPass: at.isPass,
+          t: 1, showArrow: true, arrowProgress: 1
+        })) : null;
         for(let h=0; h<holdTicks; h++){
-          renderForExport(oc, octx, from, to, 1);
+          renderForExport(oc, octx, from, to, 1, holdSteps);
           await new Promise(r=>setTimeout(r, 1000/settings.fps));
         }
       }
@@ -4230,12 +4302,37 @@ async function startExport(){
     if(!exportCancelled && lastF && lastF.arrows && lastF.arrows.length > 0){
       const resultP = lastF.resultPlayers || calcResultPlayers(lastF);
       const tempTo = { players: cloneP(resultP), arrows: [], playerArrowMap: {} };
-      const totalTicks = Math.ceil(spd / 1000 * settings.fps);
-      for(let tick=0; tick<=totalTicks; tick++){
-        if(exportCancelled) break;
-        const t = Math.min(1, tick/totalTicks);
-        renderForExport(oc, octx, lastF, tempTo, t);
-        await new Promise(r=>setTimeout(r, 1000/settings.fps));
+      const lastArrowTimings = buildExportArrowTimings(lastF);
+      const lastArrowCount = lastArrowTimings.length;
+
+      if(lastArrowCount === 0){
+        const totalTicks = Math.ceil(spd / 1000 * settings.fps);
+        for(let tick=0; tick<=totalTicks; tick++){
+          if(exportCancelled) break;
+          const t = Math.min(1, tick/totalTicks);
+          renderForExport(oc, octx, lastF, tempTo, t);
+          await new Promise(r=>setTimeout(r, 1000/settings.fps));
+        }
+      } else {
+        const arrowPhaseDur = lastArrowCount * ARROW_EACH_MS;
+        const moveStartMs = arrowPhaseDur + PAUSE_MS;
+        const moveDurMs = spd;
+        const totalDurMs = moveStartMs + moveDurMs;
+        const totalTicks = Math.ceil(totalDurMs / 1000 * settings.fps);
+
+        for(let tick=0; tick<=totalTicks; tick++){
+          if(exportCancelled) break;
+          const elapsedMs = (tick / settings.fps) * 1000;
+          const moveT = elapsedMs >= moveStartMs ? Math.min(1, (elapsedMs - moveStartMs) / moveDurMs) : 0;
+          const steps = lastArrowTimings.map(at => ({
+            playerId: at.playerId, arrow: at.arrow, isPass: at.isPass,
+            t: moveT,
+            showArrow: elapsedMs >= at.index * ARROW_EACH_MS,
+            arrowProgress: elapsedMs >= at.index * ARROW_EACH_MS ? Math.min(1, (elapsedMs - at.index * ARROW_EACH_MS) / ARROW_EACH_MS) : 0
+          }));
+          renderForExport(oc, octx, lastF, tempTo, 0, steps);
+          await new Promise(r=>setTimeout(r, 1000/settings.fps));
+        }
       }
     }
     // 最終フレームを1.5秒間ホールド表示（結果位置のみ、矢印なし）
@@ -4367,21 +4464,54 @@ async function exportAsGif(spd, settings, W, courtH, oc, octx){
   const delay = Math.round(1000 / gifFps);
   let framesDone = 0;
 
+  const ARROW_EACH_MS = 700;
+  const PAUSE_MS = 300;
+
   for(let fi=0; fi<frames.length-1; fi++){
     if(exportCancelled) break;
     const from=frames[fi], to=frames[fi+1];
-    const totalTicks = Math.ceil(spd/1000*gifFps);
-    for(let tick=0; tick<=totalTicks; tick++){
-      if(exportCancelled) break;
-      const t = Math.min(1, tick/totalTicks);
-      renderForExport(gifCanvas, gifCtx, from, to, t);
-      gif.addFrame(gifCtx, {copy:true, delay});
-      if(tick % 2 === 0) await new Promise(r=>setTimeout(r, 0));
+    const arrowTimings = buildExportArrowTimings(from);
+    const arrowCount = arrowTimings.length;
+
+    if(arrowCount === 0){
+      const totalTicks = Math.ceil(spd/1000*gifFps);
+      for(let tick=0; tick<=totalTicks; tick++){
+        if(exportCancelled) break;
+        const t = Math.min(1, tick/totalTicks);
+        renderForExport(gifCanvas, gifCtx, from, to, t);
+        gif.addFrame(gifCtx, {copy:true, delay});
+        if(tick % 2 === 0) await new Promise(r=>setTimeout(r, 0));
+      }
+    } else {
+      const arrowPhaseDur = arrowCount * ARROW_EACH_MS;
+      const moveStartMs = arrowPhaseDur + PAUSE_MS;
+      const moveDurMs = spd;
+      const totalDurMs = moveStartMs + moveDurMs;
+      const totalTicks = Math.ceil(totalDurMs / 1000 * gifFps);
+
+      for(let tick=0; tick<=totalTicks; tick++){
+        if(exportCancelled) break;
+        const elapsedMs = (tick / gifFps) * 1000;
+        const moveT = elapsedMs >= moveStartMs ? Math.min(1, (elapsedMs - moveStartMs) / moveDurMs) : 0;
+        const steps = arrowTimings.map(at => ({
+          playerId: at.playerId, arrow: at.arrow, isPass: at.isPass,
+          t: moveT,
+          showArrow: elapsedMs >= at.index * ARROW_EACH_MS,
+          arrowProgress: elapsedMs >= at.index * ARROW_EACH_MS ? Math.min(1, (elapsedMs - at.index * ARROW_EACH_MS) / ARROW_EACH_MS) : 0
+        }));
+        renderForExport(gifCanvas, gifCtx, from, to, 0, steps);
+        gif.addFrame(gifCtx, {copy:true, delay});
+        if(tick % 2 === 0) await new Promise(r=>setTimeout(r, 0));
+      }
     }
     // Hold
     const holdFrames = isIOS ? 1 : Math.ceil(0.5*gifFps);
+    const holdSteps = arrowCount > 0 ? arrowTimings.map(at => ({
+      playerId: at.playerId, arrow: at.arrow, isPass: at.isPass,
+      t: 1, showArrow: true, arrowProgress: 1
+    })) : null;
     for(let h=0;h<holdFrames;h++){
-      renderForExport(gifCanvas, gifCtx, from, to, 1);
+      renderForExport(gifCanvas, gifCtx, from, to, 1, holdSteps);
       gif.addFrame(gifCtx, {copy:true, delay});
     }
     framesDone++;
@@ -4394,13 +4524,39 @@ async function exportAsGif(spd, settings, W, courtH, oc, octx){
   if(!exportCancelled && gifLastF && gifLastF.arrows && gifLastF.arrows.length > 0){
     const resultP = gifLastF.resultPlayers || calcResultPlayers(gifLastF);
     const tempTo = { players: cloneP(resultP), arrows: [], playerArrowMap: {} };
-    const totalTicks = Math.ceil(spd/1000*gifFps);
-    for(let tick=0; tick<=totalTicks; tick++){
-      if(exportCancelled) break;
-      const t = Math.min(1, tick/totalTicks);
-      renderForExport(gifCanvas, gifCtx, gifLastF, tempTo, t);
-      gif.addFrame(gifCtx, {copy:true, delay});
-      await new Promise(r=>setTimeout(r,16));
+    const lastArrowTimings = buildExportArrowTimings(gifLastF);
+    const lastArrowCount = lastArrowTimings.length;
+
+    if(lastArrowCount === 0){
+      const totalTicks = Math.ceil(spd/1000*gifFps);
+      for(let tick=0; tick<=totalTicks; tick++){
+        if(exportCancelled) break;
+        const t = Math.min(1, tick/totalTicks);
+        renderForExport(gifCanvas, gifCtx, gifLastF, tempTo, t);
+        gif.addFrame(gifCtx, {copy:true, delay});
+        await new Promise(r=>setTimeout(r,16));
+      }
+    } else {
+      const arrowPhaseDur = lastArrowCount * ARROW_EACH_MS;
+      const moveStartMs = arrowPhaseDur + PAUSE_MS;
+      const moveDurMs = spd;
+      const totalDurMs = moveStartMs + moveDurMs;
+      const totalTicks = Math.ceil(totalDurMs / 1000 * gifFps);
+
+      for(let tick=0; tick<=totalTicks; tick++){
+        if(exportCancelled) break;
+        const elapsedMs = (tick / gifFps) * 1000;
+        const moveT = elapsedMs >= moveStartMs ? Math.min(1, (elapsedMs - moveStartMs) / moveDurMs) : 0;
+        const steps = lastArrowTimings.map(at => ({
+          playerId: at.playerId, arrow: at.arrow, isPass: at.isPass,
+          t: moveT,
+          showArrow: elapsedMs >= at.index * ARROW_EACH_MS,
+          arrowProgress: elapsedMs >= at.index * ARROW_EACH_MS ? Math.min(1, (elapsedMs - at.index * ARROW_EACH_MS) / ARROW_EACH_MS) : 0
+        }));
+        renderForExport(gifCanvas, gifCtx, gifLastF, tempTo, 0, steps);
+        gif.addFrame(gifCtx, {copy:true, delay});
+        await new Promise(r=>setTimeout(r,16));
+      }
     }
   }
 
@@ -4489,16 +4645,48 @@ async function exportFramesAsZip(spd, settings, W, courtH, oc, octx){
   for(let fi=0; fi<frames.length-1; fi++){
     if(exportCancelled) break;
     const from=frames[fi], to=frames[fi+1];
-    const steps=Math.max(8, Math.ceil(spd/1000*15));
-    for(let tick=0; tick<=steps; tick++){
-      if(exportCancelled) break;
-      const t=Math.min(1,tick/steps);
-      renderForExport(oc, octx, from, to, t);
-      const dataUrl=oc.toDataURL('image/png');
-      const b64=dataUrl.split(',')[1];
-      imgFolder.file(`frame_${String(imgIdx).padStart(4,'0')}.png`, b64, {base64:true});
-      imgIdx++;
-      await new Promise(r=>setTimeout(r,16));
+    const arrowTimings = buildExportArrowTimings(from);
+    const arrowCount = arrowTimings.length;
+    const zipFps = 15;
+    const ARROW_EACH_MS = 700;
+    const PAUSE_MS = 300;
+
+    if(arrowCount === 0){
+      const steps=Math.max(8, Math.ceil(spd/1000*zipFps));
+      for(let tick=0; tick<=steps; tick++){
+        if(exportCancelled) break;
+        const t=Math.min(1,tick/steps);
+        renderForExport(oc, octx, from, to, t);
+        const dataUrl=oc.toDataURL('image/png');
+        const b64=dataUrl.split(',')[1];
+        imgFolder.file(`frame_${String(imgIdx).padStart(4,'0')}.png`, b64, {base64:true});
+        imgIdx++;
+        await new Promise(r=>setTimeout(r,16));
+      }
+    } else {
+      const arrowPhaseDur = arrowCount * ARROW_EACH_MS;
+      const moveStartMs = arrowPhaseDur + PAUSE_MS;
+      const moveDurMs = spd;
+      const totalDurMs = moveStartMs + moveDurMs;
+      const totalTicks = Math.ceil(totalDurMs / 1000 * zipFps);
+
+      for(let tick=0; tick<=totalTicks; tick++){
+        if(exportCancelled) break;
+        const elapsedMs = (tick / zipFps) * 1000;
+        const moveT = elapsedMs >= moveStartMs ? Math.min(1, (elapsedMs - moveStartMs) / moveDurMs) : 0;
+        const stepsArr = arrowTimings.map(at => ({
+          playerId: at.playerId, arrow: at.arrow, isPass: at.isPass,
+          t: moveT,
+          showArrow: elapsedMs >= at.index * ARROW_EACH_MS,
+          arrowProgress: elapsedMs >= at.index * ARROW_EACH_MS ? Math.min(1, (elapsedMs - at.index * ARROW_EACH_MS) / ARROW_EACH_MS) : 0
+        }));
+        renderForExport(oc, octx, from, to, 0, stepsArr);
+        const dataUrl=oc.toDataURL('image/png');
+        const b64=dataUrl.split(',')[1];
+        imgFolder.file(`frame_${String(imgIdx).padStart(4,'0')}.png`, b64, {base64:true});
+        imgIdx++;
+        await new Promise(r=>setTimeout(r,16));
+      }
     }
     setExpStatus(`フレーム ${fi+1}/${frames.length-1}`, 3+(fi/(frames.length-1))*85);
   }
