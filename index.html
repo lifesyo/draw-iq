@@ -34,7 +34,7 @@
 if('serviceWorker' in navigator){
   // SW本体をBlobで生成・登録
   const swCode = `
-    const CACHE_NAME = 'draw-iq-v5';
+    const CACHE_NAME = 'draw-iq-v6';
     const PRECACHE = [
       './',
       './index.html'
@@ -1085,7 +1085,7 @@ const PRICE_MONTHLY = STRIPE_KEYS[STRIPE_MODE].priceMonthly;
 const PRICE_YEARLY  = STRIPE_KEYS[STRIPE_MODE].priceYearly;
 const FREE_MAX_PLAYS  = 5;
 const FREE_MAX_FRAMES = 3;
-let userPlan = 'free'; // 'free' | 'pro'
+let userPlan = localStorage.getItem('diq_owner_pro')==='1' ? 'pro' : 'free';
 let stripeCustomerId = null;
 
 async function checkSubscription(){
