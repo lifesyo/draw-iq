@@ -1182,9 +1182,9 @@ window.onFbAuthChange = async function(user){
     if(user.photoURL){ avatarImg.src=user.photoURL; avatar.style.display='block'; }
     // クラウド同期（オフラインならIDBフォールバック）
     await syncFromCloud();
-    // サブスク確認（オフラインなら前回の状態を維持）
+    // サブスク確認（オフラインならlocalStorageから復元）
+    await checkSubscription();
     if(navigator.onLine){
-      await checkSubscription();
       // Checkout成功直後: Webhookが未処理の場合リトライ
       if(_checkoutSuccess && userPlan !== 'pro'){
         for(let i = 0; i < 5; i++){
@@ -1206,7 +1206,9 @@ window.onFbAuthChange = async function(user){
     btn.classList.remove('signed-in');
     label.textContent = 'Googleでログイン';
     avatar.style.display = 'none';
-    userPlan = 'free'; stripeCustomerId = null; updatePlanUI();
+    userPlan = 'free'; stripeCustomerId = null;
+    if(!navigator.onLine && localStorage.getItem('diq_owner_pro')==='1'){ userPlan='pro'; }
+    updatePlanUI();
     // 未ログインでもIDBからデータ復元
     if(window._idbLoad){
       try{
