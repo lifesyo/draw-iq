@@ -1,4 +1,4 @@
-const CACHE_NAME = 'draw-iq-v4';
+const CACHE_NAME = 'draw-iq-v5';
 const PRECACHE = [
   './',
   './index.html'
@@ -37,7 +37,7 @@ self.addEventListener('fetch', e => {
   }
 
   // CDNリソース: Cache-First（フォント・ライブラリ等）
-  const isCDN = CDN_PATTERNS.some(p => url.hostname.includes(p));
+  const isCDN = CDN_PATTERNS.some(p => url.hostname.includes(p) || url.href.includes(p));
   if(isCDN){
     e.respondWith(
       caches.match(e.request).then(cached => {
