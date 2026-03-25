@@ -1090,8 +1090,8 @@ let stripeCustomerId = null;
 
 async function checkSubscription(){
   if(!currentUser) {
-    // Offline: restore Pro from localStorage if owner previously logged in
-    if(!navigator.onLine && localStorage.getItem('diq_owner_pro')==='1'){ userPlan='pro'; } else { userPlan='free'; }
+    // No login: restore Pro from localStorage if owner previously logged in
+    if(localStorage.getItem('diq_owner_pro')==='1'){ userPlan='pro'; } else { userPlan='free'; }
     updatePlanUI(); return;
   }
   const OWNER_UIDS = ['tmpnW0YjuuUf1KbNPTC9H6ffnRG2'];
@@ -1207,7 +1207,7 @@ window.onFbAuthChange = async function(user){
     label.textContent = 'Googleでログイン';
     avatar.style.display = 'none';
     userPlan = 'free'; stripeCustomerId = null;
-    if(!navigator.onLine && localStorage.getItem('diq_owner_pro')==='1'){ userPlan='pro'; }
+    if(localStorage.getItem('diq_owner_pro')==='1'){ userPlan='pro'; }
     updatePlanUI();
     // 未ログインでもIDBからデータ復元
     if(window._idbLoad){
