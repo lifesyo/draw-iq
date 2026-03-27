@@ -804,7 +804,7 @@ input,textarea,select{-webkit-user-select:text;user-select:text;}
     </button>
   </div>
   <!-- インライン保存フォーム -->
-  <div id="inline-save" style="display:none;background:#f0faf5;border-bottom:2px solid var(--accent);
+  <div id="inline-save" style="display:none;background:var(--panel);border-bottom:2px solid var(--accent);
     padding:10px 14px;gap:8px;flex-direction:column;flex-shrink:0;">
     <div style="font-size:12px;font-weight:700;color:var(--accent);margin-bottom:2px">📋 現在の盤面を保存</div>
     <div style="display:flex;gap:8px;margin-bottom:4px;">
@@ -813,10 +813,10 @@ input,textarea,select{-webkit-user-select:text;user-select:text;}
     </div>
     <input id="inline-play-name" type="text" placeholder="プレー名を入力（例: ピックアンドロール）"
       maxlength="30" style="width:100%;padding:10px 12px;border:1.5px solid var(--accent);
-      border-radius:8px;font-size:14px;font-family:inherit;outline:none;">
+      border-radius:8px;font-size:14px;font-family:inherit;outline:none;color:#fff;background:var(--card);">
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:4px">
       <select id="inline-folder-sel" style="flex:1;padding:8px;border:1px solid var(--border);
-        border-radius:8px;font-size:13px;font-family:inherit;background:var(--bg)">
+        border-radius:8px;font-size:13px;font-family:inherit;background:var(--card);color:#fff">>
         <option value="">📂 フォルダなし</option>
       </select>
       <button class="btn" onclick="closeInlineSave()">キャンセル</button>
@@ -2516,68 +2516,10 @@ function render(fromF=null, toF=null, moveT=0, arrowT=null, steps=null) {
         const _recvIds = fromF.passReceiverId ? (Array.isArray(fromF.passReceiverId) ? fromF.passReceiverId : [fromF.passReceiverId]) : [];
 
         allPassArrows.forEach(pa => {
-          // このパス矢印のsenderを特定
-          let senderP = null;
-          const sEntry = Object.entries(pamF).find(([id,v])=>v.arrow === pa);
-          if(sEntry) senderP = fromF.players.find(p=>String(p.id)===String(sEntry[0]));
-          if(!senderP){
-            // pamに入っていない場合、矢印始点に最も近い選手
-            let bestD = Infinity;
-            fromF.players.forEach(p => {
-              const d = Math.hypot(p.x-pa.pts[0].x, p.y-pa.pts[0].y);
-              if(d<bestD){bestD=d; senderP=p;}
-            });
-          }
-          if(!senderP) return;
-          // senderの現在位置（移動中なら移動先）
-          let sx, sy;
-          const sStep = activeStepMap[senderP.id];
-          if(sStep && !sStep.isPass){
-            const sE = _easeF(sStep.t);
-            const aP = sampleArrow(sStep.arrow, sE);
-            const aS = sStep.arrow.pts[0];
-            sx = aP.x + (senderP.x-aS.x)*(1-sE);
-            sy = aP.y + (senderP.y-aS.y)*(1-sE);
-          } else { sx=senderP.x; sy=senderP.y; }
-
-          // receiverを特定（パス矢印の終点に最も近いレシーバー）
+          // パス矢印の始点→終点を直線的にボールが飛ぶ
+          const sx = pa.pts[0].x, sy = pa.pts[0].y;
           const ep = pa.pts[pa.pts.length-1];
-          let recvP = null, recvD = Infinity;
-          _recvIds.forEach(rid => {
-            const rp = fromF.players.find(p=>String(p.id)===String(rid));
-            if(!rp) return;
-            // レシーバーのカット先を考慮
-            const rEntry = pamF[rp.id];
-            let rx, ry;
-            if(rEntry && !rEntry.isPass){ const rEnd=rEntry.arrow.pts[rEntry.arrow.pts.length-1]; rx=rEnd.x; ry=rEnd.y; }
-            else { rx=rp.x; ry=rp.y; }
-            const d = Math.hypot(rx-ep.x, ry-ep.y);
-            if(d < recvD){ recvD=d; recvP=rp; }
-          });
-          if(!recvP){
-            // レシーバーリストにない場合、矢印終点に最も近い非sender選手
-            fromF.players.forEach(p => {
-              if(p.id === senderP.id) return;
-              if(p.type !== senderP.type) return;
-              const rEntry = pamF[p.id];
-              let rx, ry;
-              if(rEntry && !rEntry.isPass){ const rEnd=rEntry.arrow.pts[rEntry.arrow.pts.length-1]; rx=rEnd.x; ry=rEnd.y; }
-              else { rx=p.x; ry=p.y; }
-              const d = Math.hypot(rx-ep.x, ry-ep.y);
-              if(d < recvD){ recvD=d; recvP=p; }
-            });
-          }
-          if(!recvP) return;
-          // receiverの移動先
-          let rx, ry;
-          const rStep = activeStepMap[recvP.id];
-          if(rStep && !rStep.isPass){
-            const rE = _easeF(rStep.t);
-            const rP = sampleArrow(rStep.arrow, rE);
-            const rS = rStep.arrow.pts[0];
-            rx = rP.x + (recvP.x-rS.x)*(1-rE);
-            ry = rP.y + (recvP.y-rS.y)*(1-rE);
-          } else { rx=recvP.x; ry=recvP.y; }
+          const rx = ep.x, ry = ep.y;
 
           drawFlyingBall([{pts:[{x:sx,y:sy},{x:rx,y:ry}],atype:'pass'}], _effectivePassEase);
         });
@@ -2697,23 +2639,10 @@ function render(fromF=null, toF=null, moveT=0, arrowT=null, steps=null) {
       if(hasPass){
         const _allPA2 = fromActive.filter(a=>a.atype==='pass'||a.atype==='handoff');
         _allPA2.forEach(pa => {
-          let sp2=null, bd2=Infinity;
-          fromF.players.forEach(p=>{const d=Math.hypot(p.x-pa.pts[0].x,p.y-pa.pts[0].y);if(d<bd2){bd2=d;sp2=p;}});
-          if(!sp2) return;
-          const ep2=pa.pts[pa.pts.length-1];
-          let rp2=null, rd2=Infinity;
-          fromF.players.forEach(p=>{
-            if(p.id===sp2.id||p.type!==sp2.type) return;
-            const re2=pam[p.id];
-            let rx2=p.x,ry2=p.y;
-            if(re2&&!re2.isPass){const pos2=sampleArrow(re2.arrow,1);rx2=pos2.x;ry2=pos2.y;}
-            const d2=Math.hypot(rx2-ep2.x,ry2-ep2.y);
-            if(d2<rd2){rd2=d2;rp2={x:rx2,y:ry2};}
-          });
-          if(sp2&&rp2){
-            const spPos=pam[sp2.id]&&!pam[sp2.id].isPass?sampleArrow(pam[sp2.id].arrow,ease):sp2;
-            drawFlyingBall([{pts:[{x:spPos.x,y:spPos.y},{x:rp2.x,y:rp2.y}],atype:'pass'}],ease);
-          }
+          // パス矢印の始点→終点を直線的にボールが飛ぶ
+          const sx = pa.pts[0].x, sy = pa.pts[0].y;
+          const ep2 = pa.pts[pa.pts.length-1];
+          drawFlyingBall([{pts:[{x:sx,y:sy},{x:ep2.x,y:ep2.y}],atype:'pass'}],ease);
         });
       }
       if(hasPass&&ease>0.75){
