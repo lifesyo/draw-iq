@@ -1148,6 +1148,8 @@ async function startCheckout(priceId){
 
 async function openCustomerPortal(){
   if(!currentUser){ alert('ログインが必要です'); return; }
+  const OWNER_UIDS = ['tmpnW0YjuuUf1KbNPTC9H6ffnRG2'];
+  if(OWNER_UIDS.includes(currentUser.uid)){ alert('オーナーアカウントのため、サブスク管理は不要です'); return; }
   if(!stripeCustomerId){ alert('サブスクリプション情報がありません'); return; }
   try{
     const idToken = await currentUser.getIdToken();
