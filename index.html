@@ -640,7 +640,7 @@ input,textarea,select{-webkit-user-select:text;user-select:text;}
   <button class="hbtn" onclick="undo()" title="元に戻す (⌘Z)">↩</button>
   <button class="h-new" onclick="newPlay()">＋ 新規</button>
   <button class="h-new" style="background:#fff;color:var(--accent);border-color:#fff;font-weight:800" onclick="openInlineSaveHeader()">💾 保存</button>
-  <span id="plan-badge" class="plan-badge free" onclick="showUpgradeModal()" style="cursor:pointer">FREE</span>
+  <span id="plan-badge" class="plan-badge free" onclick="isPro() ? openCustomerPortal() : showUpgradeModal()" style="cursor:pointer">FREE</span>
   <button id="btn-auth" class="btn-auth" onclick="handleAuth()" title="Googleログイン">
     <span id="auth-avatar" style="display:none;width:22px;height:22px;border-radius:50%;overflow:hidden;flex-shrink:0">
       <img id="auth-avatar-img" style="width:100%;height:100%;object-fit:cover">
@@ -1113,6 +1113,11 @@ function updatePlanUI(){
     badge.textContent = userPlan==='pro' ? 'PRO' : 'FREE';
     badge.className = 'plan-badge ' + (userPlan==='pro' ? 'pro' : 'free');
   }
+  // Show subscription manage link for Pro users
+  const manageLink = document.getElementById('manage-sub-link');
+  if(manageLink){
+    manageLink.style.display = (userPlan==='pro' && stripeCustomerId) ? 'block' : 'none';
+  }
 }
 
 function isPro(){ return userPlan === 'pro'; }
@@ -1142,14 +1147,20 @@ async function startCheckout(priceId){
 }
 
 async function openCustomerPortal(){
+  if(!currentUser){ alert('ログインが必要です'); return; }
   if(!stripeCustomerId){ alert('サブスクリプション情報がありません'); return; }
   try{
+    const idToken = await currentUser.getIdToken();
     const r = await fetch('/api/create-portal-session', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ stripeCustomerId })
+      method:'POST',
+      headers:{
+        'Content-Type':'application/json',
+        'Authorization': 'Bearer ' + idToken
+      }
     });
     const d = await r.json();
     if(d.url) window.location.href = d.url;
+    else alert('ポータルの作成に失敗しました');
   }catch(e){ alert('エラー: '+e.message); }
 }
 
