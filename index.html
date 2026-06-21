@@ -685,7 +685,7 @@ body.embed { overflow: hidden; }
 }
 @keyframes embspin { to { transform: rotate(360deg); } }
 #embed-error { padding: 20px; text-align: center; color: var(--text); font-size: 14px; line-height: 1.7; }
-
+</style>
 </head>
 <body>
 <div id="embed-loading" style="display:none"><div class="sp"></div><div>作戦板を読み込み中…</div></div>
@@ -6249,4 +6249,10 @@ initFrameReorder();
 </div>
 
 <script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script>
-function showLegalModal(){ document.getEle
+function showLegalModal(){ document.getElementById('legal-modal').style.display='flex'; }
+function closeLegalModal(){ document.getElementById('legal-modal').style.display='none'; }
+function showPrivacyModal(){ document.getElementById('privacy-modal').style.display='flex'; }
+function closePrivacyModal(){ document.getElementById('privacy-modal').style.display='none'; }
+</script>
+</body>
+</html>
