@@ -223,6 +223,33 @@ if (FIREBASE_CONFIG) {
     try { await deleteDoc(doc(db,'users',uid,'drills',String(playId))); } catch(e){}
   };
 
+  // ── 作戦板の共有（限定公開）: publicPlays/{shareId} に軽量コピーを保存 ──
+  function _stripForShare(play){
+    const p = {...play};
+    if(p.frames) p.frames = p.frames.map(f => {
+      const fc = {...f}; delete fc._hdThumb; delete fc.thumbnail; return fc;
+    });
+    delete p.thumbnail; delete p._hdThumb;
+    return p;
+  }
+  window._fbSharePlay = async (play, shareId, owner) => {
+    const data = {
+      play: _stripForShare(play),
+      title: String(play.name || play.title || '作戦板'),
+      courtMode: play.courtMode || null,
+      owner: owner || null,
+      createdAt: serverTimestamp(),
+      v: 1
+    };
+    await setDoc(doc(db,'publicPlays',String(shareId)), data);
+    return shareId;
+  };
+  window._fbLoadPublicPlay = async (shareId) => {
+    const snap = await getDoc(doc(db,'publicPlays',String(shareId)));
+    if(!snap.exists()) return null;
+    return snap.data();
+  };
+
   onAuthStateChanged(auth, user => {
     if(typeof window.onFbAuthChange === 'function') window.onFbAuthChange(user);
   });
@@ -234,6 +261,8 @@ if (FIREBASE_CONFIG) {
   window._fbSaveData = async () => {};
   window._fbLoadData = async () => ({folders:[], playFolders:[], drillFolders:[], plays:[]});
   window._fbDeletePlay = async () => {};
+  window._fbSharePlay = async () => { alert('共有にはFirebaseの設定とログインが必要です。'); return null; };
+  window._fbLoadPublicPlay = async () => null;
 }
 </script>
 <script>
@@ -625,9 +654,41 @@ input,textarea,select{-webkit-user-select:text;user-select:text;}
   box-shadow:0 3px 12px rgba(0,168,107,.4);z-index:300;display:none;
   animation:fadeup .4s ease;}
 @keyframes fadeup{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
-</style>
+/* ===== 埋め込み（再生専用）モード ===== */
+body.embed #hdr,
+body.embed #sb-wrap,
+body.embed #frame-memo-bar,
+body.embed #bar .btn.success,
+body.embed #bar [onclick*="showVideoExportModal"],
+body.embed #bar [onclick*="showPDFChoiceModal"],
+body.embed #bar #btn-del,
+body.embed #bar .bar-tab-btn,
+body.embed #bar #frames-strip,
+body.embed #bar .sep,
+body.embed #sync-badge { display: none !important; }
+body.embed #main { height: 100vh; }
+body.embed #cw { width: 100%; }
+body.embed #bar {
+  justify-content: center; gap: 14px; padding: 8px 10px;
+  background: var(--panel); border-top: 1px solid var(--border);
+}
+body.embed #bar .btn { font-size: 15px; padding: 9px 16px; }
+body.embed { overflow: hidden; }
+#embed-loading {
+  position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+  flex-direction: column; gap: 12px; background: var(--bg); z-index: 9999;
+  color: var(--text); font-size: 14px;
+}
+#embed-loading .sp {
+  width: 30px; height: 30px; border: 3px solid var(--border); border-top-color: var(--accent);
+  border-radius: 50%; animation: embspin 0.8s linear infinite;
+}
+@keyframes embspin { to { transform: rotate(360deg); } }
+#embed-error { padding: 20px; text-align: center; color: var(--text); font-size: 14px; line-height: 1.7; }
+
 </head>
 <body>
+<div id="embed-loading" style="display:none"><div class="sp"></div><div>作戦板を読み込み中…</div></div>
 <div id="sync-badge">☁️ 同期完了</div>
 <header id="hdr">
   <button class="hbtn" onclick="toggleSB()">☰</button>
@@ -886,6 +947,8 @@ input,textarea,select{-webkit-user-select:text;user-select:text;}
     <div style="display:flex;gap:10px;padding-top:4px;">
       <button class="btn primary" onclick="loadPlayFromDetail()" style="flex:1;justify-content:center;
         font-size:14px;padding:12px;">📋 作戦板で開く</button>
+      <button class="btn" onclick="sharePlayFromDetail()" style="flex:1;justify-content:center;
+        font-size:14px;padding:12px;background:#00897b;color:#fff;border-color:#00897b;">🔗 共有リンク</button>
     </div>
    </div>
   </div>
@@ -5174,6 +5237,94 @@ function loadPlayFromDetail() {
   closePlayDetail();
 }
 
+// ── 共有リンク（限定公開）の発行 ──
+function _genShareId(){
+  // 推測しにくい22文字程度のID
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  let s = '';
+  const arr = (window.crypto && crypto.getRandomValues) ? crypto.getRandomValues(new Uint8Array(22)) : null;
+  for(let i=0;i<22;i++){
+    const r = arr ? arr[i] : Math.floor(Math.random()*256);
+    s += chars[r % chars.length];
+  }
+  return s;
+}
+async function sharePlayFromDetail(){
+  if(_detailPlayId === null) return;
+  let play = plays.find(p => p.id === _detailPlayId);
+  if(!play) play = drills.find(p => p.id === _detailPlayId);
+  if(!play) return;
+
+  if(!currentUser){
+    alert('共有リンクの発行にはログインが必要です。');
+    return;
+  }
+  if(!play.frames || play.frames.length === 0){
+    alert('フレームが無い作戦板は共有できません。');
+    return;
+  }
+
+  // 既存の共有IDがあれば使い回す（更新）。無ければ新規発行
+  const shareId = play.shareId || _genShareId();
+  try {
+    const ownerName = currentUser.displayName || '';
+    await window._fbSharePlay(play, shareId, ownerName);
+    // 作戦板側にも shareId を記録して次回から同じURLに
+    if(!play.shareId){
+      play.shareId = shareId;
+      syncToCloud();
+    }
+    const url = location.origin + location.pathname + '?embed=' + shareId;
+    showShareModal(url);
+  } catch(e){
+    console.error('share error:', e);
+    alert('共有リンクの発行に失敗しました。通信環境を確認してください。');
+  }
+}
+
+function showShareModal(url){
+  let modal = document.getElementById('share-modal');
+  if(!modal){
+    modal = document.createElement('div');
+    modal.id = 'share-modal';
+    modal.className = 'mo';
+    modal.innerHTML =
+      '<div class="md" style="max-width:440px">'
+      + '<h2>🔗 共有リンク</h2>'
+      + '<p style="font-size:13px;color:var(--text-dim,#666);line-height:1.7;margin:0 0 12px">'
+      + 'このリンクを知っている人だけが、作戦板の再生を見られます。<br>Drill IQの練習メニューやノートに貼り付けて使えます。</p>'
+      + '<input type="text" id="share-url-input" readonly style="width:100%;padding:11px;border:1.5px solid var(--border);border-radius:9px;font-size:13px;background:var(--card);color:var(--text);margin-bottom:6px">'
+      + '<div class="mda" style="margin-top:10px">'
+      + '<button class="btn" onclick="closeShareModal()">閉じる</button>'
+      + '<button class="btn primary" onclick="copyShareUrl()">📋 コピー</button>'
+      + '</div></div>';
+    document.body.appendChild(modal);
+  }
+  modal.querySelector('#share-url-input').value = url;
+  modal.classList.add('show');
+  setTimeout(()=>{ const i = modal.querySelector('#share-url-input'); if(i){ i.focus(); i.select(); } }, 100);
+}
+function closeShareModal(){
+  const m = document.getElementById('share-modal');
+  if(m){ m.classList.remove('show'); }
+}
+function copyShareUrl(){
+  const i = document.getElementById('share-url-input');
+  if(!i) return;
+  const txt = i.value;
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(txt).then(()=>{ _shareCopied(); }, ()=>_shareCopyFallback(i));
+  } else _shareCopyFallback(i);
+}
+function _shareCopyFallback(i){
+  i.focus(); i.select();
+  try { document.execCommand('copy'); _shareCopied(); } catch(e){ alert('コピーできませんでした'); }
+}
+function _shareCopied(){
+  const btn = document.querySelector('#share-modal .btn.primary');
+  if(btn){ const o = btn.textContent; btn.textContent = '✓ コピーしました'; setTimeout(()=>{ btn.textContent = o; }, 1500); }
+}
+
 function deletePlayFromDetail() {
   if (_detailPlayId === null) return;
   if (!confirm('削除しますか？')) return;
@@ -5966,6 +6117,64 @@ initFrameReorder();
       }
     }catch(e){ console.error('IDB initial load error:', e); }
   }
+})();
+
+// ====== 埋め込み（再生専用）モード： ?embed=shareId ======
+(function(){
+  const params = new URLSearchParams(window.location.search);
+  const shareId = params.get('embed');
+  if(!shareId) return;
+
+  document.body.classList.add('embed');
+  const loading = document.getElementById('embed-loading');
+  if(loading) loading.style.display = 'flex';
+
+  function showEmbedError(msg){
+    if(loading){
+      loading.innerHTML = '<div id="embed-error">⚠️ ' + msg + '</div>';
+    }
+  }
+
+  // Firebaseの公開読み込み関数が用意されるまで待つ
+  let waited = 0;
+  const timer = setInterval(async () => {
+    if(typeof window._fbLoadPublicPlay !== 'function'){
+      waited += 100;
+      if(waited > 8000){ clearInterval(timer); showEmbedError('読み込みに失敗しました（接続を確認してください）'); }
+      return;
+    }
+    clearInterval(timer);
+    try {
+      const rec = await window._fbLoadPublicPlay(shareId);
+      if(!rec || !rec.play){ showEmbedError('この作戦板は見つかりませんでした。<br>リンクが正しいか確認してください。'); return; }
+      const play = rec.play;
+
+      // コートモードを合わせる
+      if(play.courtMode && typeof setCourt === 'function'){
+        try { setCourt(play.courtMode); } catch(e){}
+      }
+      // フレームを読み込む
+      if(typeof cloneFrames === 'function' && Array.isArray(play.frames)){
+        frames = cloneFrames(play.frames);
+        currentFrame = 0;
+        if(frames.length > 0 && typeof loadFrame === 'function') loadFrame(0);
+        if(typeof updateFrameUI === 'function') updateFrameUI();
+        if(typeof resize === 'function') resize();
+        if(typeof render === 'function') render();
+      }
+      if(loading) loading.style.display = 'none';
+
+      // 少し待ってから自動再生
+      setTimeout(() => {
+        if(frames.length > 1 && typeof startPlay === 'function' && !isPlaying){
+          try { startPlay(); } catch(e){}
+        }
+      }, 500);
+    } catch(e){
+      console.error('embed load error:', e);
+      showEmbedError('読み込み中にエラーが発生しました。');
+    }
+  }, 100);
 })();
 </script>
 <!-- Upgrade Modal -->
