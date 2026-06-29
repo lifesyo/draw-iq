@@ -223,6 +223,22 @@ if (FIREBASE_CONFIG) {
     try { await deleteDoc(doc(db,'users',uid,'drills',String(playId))); } catch(e){}
   };
 
+  window._fbSharePlay = async (play, shareId, ownerName) => {
+    const data = JSON.parse(JSON.stringify(play));
+    // サムネイル削除（容量節約）
+    if(data.frames) data.frames = data.frames.map(f => {
+      const fc = {...f}; delete fc._hdThumb; delete fc.thumbnail; return fc;
+    });
+    data.sharedAt = Date.now();
+    data.ownerName = ownerName || '';
+    await setDoc(doc(db, 'sharedPlays', shareId), data);
+  };
+
+  window._fbLoadSharedPlay = async (shareId) => {
+    const snap = await getDoc(doc(db, 'sharedPlays', shareId));
+    return snap.exists() ? snap.data() : null;
+  };
+
   onAuthStateChanged(auth, user => {
     if(typeof window.onFbAuthChange === 'function') window.onFbAuthChange(user);
   });
@@ -234,6 +250,8 @@ if (FIREBASE_CONFIG) {
   window._fbSaveData = async () => {};
   window._fbLoadData = async () => ({folders:[], playFolders:[], drillFolders:[], plays:[]});
   window._fbDeletePlay = async () => {};
+  window._fbSharePlay = async () => {};
+  window._fbLoadSharedPlay = async () => null;
 }
 </script>
 <script>
@@ -889,6 +907,8 @@ input,textarea,select{-webkit-user-select:text;user-select:text;}
     <div style="display:flex;gap:10px;padding-top:4px;">
       <button class="btn primary" onclick="loadPlayFromDetail()" style="flex:1;justify-content:center;
         font-size:14px;padding:12px;">📋 作戦板で開く</button>
+      <button class="btn" onclick="sharePlayFromDetail()" style="flex:1;justify-content:center;
+        font-size:14px;padding:12px;">🔗 共有リンク</button>
     </div>
    </div>
   </div>
@@ -5263,6 +5283,87 @@ function loadPlayFromDetail() {
   closePlayDetail();
 }
 
+// ── 共有リンク（限定公開）の発行 ──
+function _genShareId(){
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  let s = '';
+  const arr = (window.crypto && crypto.getRandomValues) ? crypto.getRandomValues(new Uint8Array(22)) : null;
+  for(let i=0;i<22;i++){
+    const r = arr ? arr[i] : Math.floor(Math.random()*256);
+    s += chars[r % chars.length];
+  }
+  return s;
+}
+async function sharePlayFromDetail(){
+  if(_detailPlayId === null) return;
+  let play = plays.find(p => p.id === _detailPlayId);
+  if(!play) play = drills.find(p => p.id === _detailPlayId);
+  if(!play) return;
+
+  if(!currentUser){
+    alert('共有リンクの発行にはログインが必要です。');
+    return;
+  }
+  if(!play.frames || play.frames.length === 0){
+    alert('フレームが無い作戦板は共有できません。');
+    return;
+  }
+
+  const shareId = play.shareId || _genShareId();
+  try {
+    const ownerName = currentUser.displayName || '';
+    await window._fbSharePlay(play, shareId, ownerName);
+    if(!play.shareId){
+      play.shareId = shareId;
+      syncToCloud();
+    }
+    const url = location.origin + location.pathname + '?embed=' + shareId;
+    showShareModal(url);
+  } catch(e){
+    console.error('share error:', e);
+    alert('共有リンクの発行に失敗しました。通信環境を確認してください。');
+  }
+}
+
+function showShareModal(url){
+  let modal = document.getElementById('share-modal');
+  if(!modal){
+    modal = document.createElement('div');
+    modal.id = 'share-modal';
+    modal.className = 'mo';
+    modal.innerHTML =
+      '<div class="md" style="max-width:440px">'
+      + '<h2>\uD83D\uDD17 共有リンク</h2>'
+      + '<p style="font-size:13px;color:var(--text-dim);line-height:1.7;margin:0 0 12px">'
+      + 'このリンクを知っている人だけが、作戦板の再生を見られます。</p>'
+      + '<input type="text" id="share-url-input" readonly style="width:100%;padding:11px;border:1.5px solid var(--border);border-radius:9px;font-size:13px;background:var(--card);color:var(--text);margin-bottom:6px">'
+      + '<div class="mda" style="margin-top:10px">'
+      + '<button class="btn" onclick="closeShareModal()">閉じる</button>'
+      + '<button class="btn primary" onclick="copyShareUrl()">\uD83D\uDCCB コピー</button>'
+      + '</div></div>';
+    document.body.appendChild(modal);
+  }
+  modal.querySelector('#share-url-input').value = url;
+  modal.classList.add('show');
+  modal.style.display = 'flex';
+  setTimeout(()=>{ const i = modal.querySelector('#share-url-input'); if(i){ i.focus(); i.select(); } }, 100);
+}
+function closeShareModal(){
+  const m = document.getElementById('share-modal');
+  if(m){ m.classList.remove('show'); m.style.display = 'none'; }
+}
+function copyShareUrl(){
+  const inp = document.getElementById('share-url-input');
+  if(!inp) return;
+  navigator.clipboard.writeText(inp.value).then(()=>{
+    const btn = document.querySelector('#share-modal .btn.primary');
+    if(btn){ btn.textContent = '✅ コピーしました'; setTimeout(()=>{ btn.textContent = '\uD83D\uDCCB コピー'; }, 2000); }
+  }).catch(()=>{
+    inp.select();
+    document.execCommand('copy');
+  });
+}
+
 function deletePlayFromDetail() {
   if (_detailPlayId === null) return;
   if (!confirm('削除しますか？')) return;
@@ -6004,6 +6105,7 @@ function newPlay(){
 updatePlanUI();
 // 決済結果チェック
 let _checkoutSuccess = false;
+let _embedMode = false;
 (function(){
   const params = new URLSearchParams(window.location.search);
   if(params.get('checkout')==='success' || params.get('payment')==='success'){
@@ -6011,6 +6113,28 @@ let _checkoutSuccess = false;
     window.history.replaceState({}, '', window.location.pathname);
   } else if(params.get('checkout')==='cancel' || params.get('payment')==='cancelled'){
     window.history.replaceState({}, '', window.location.pathname);
+  }
+  // 共有リンクの埋め込み再生
+  const embedId = params.get('embed');
+  if(embedId && window._fbLoadSharedPlay){
+    _embedMode = true;
+    (async()=>{
+      try{
+        const data = await window._fbLoadSharedPlay(embedId);
+        if(!data || !data.frames || data.frames.length === 0){
+          alert('共有データが見つかりませんでした。');
+          return;
+        }
+        // 共有プレーを読み込み
+        plays = [data];
+        loadPlay(data.id);
+        // 自動再生
+        setTimeout(()=>{ if(frames.length > 0) togglePlay(); }, 600);
+      }catch(e){
+        console.error('embed load error:', e);
+        alert('共有データの読み込みに失敗しました。');
+      }
+    })();
   }
 })();
 if(window.innerWidth<600){
