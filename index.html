@@ -223,33 +223,6 @@ if (FIREBASE_CONFIG) {
     try { await deleteDoc(doc(db,'users',uid,'drills',String(playId))); } catch(e){}
   };
 
-  // ── 作戦板の共有（限定公開）: publicPlays/{shareId} に軽量コピーを保存 ──
-  function _stripForShare(play){
-    const p = {...play};
-    if(p.frames) p.frames = p.frames.map(f => {
-      const fc = {...f}; delete fc._hdThumb; delete fc.thumbnail; return fc;
-    });
-    delete p.thumbnail; delete p._hdThumb;
-    return p;
-  }
-  window._fbSharePlay = async (play, shareId, owner) => {
-    const data = {
-      play: _stripForShare(play),
-      title: String(play.name || play.title || '作戦板'),
-      courtMode: play.courtMode || null,
-      owner: owner || null,
-      createdAt: serverTimestamp(),
-      v: 1
-    };
-    await setDoc(doc(db,'publicPlays',String(shareId)), data);
-    return shareId;
-  };
-  window._fbLoadPublicPlay = async (shareId) => {
-    const snap = await getDoc(doc(db,'publicPlays',String(shareId)));
-    if(!snap.exists()) return null;
-    return snap.data();
-  };
-
   onAuthStateChanged(auth, user => {
     if(typeof window.onFbAuthChange === 'function') window.onFbAuthChange(user);
   });
@@ -261,8 +234,6 @@ if (FIREBASE_CONFIG) {
   window._fbSaveData = async () => {};
   window._fbLoadData = async () => ({folders:[], playFolders:[], drillFolders:[], plays:[]});
   window._fbDeletePlay = async () => {};
-  window._fbSharePlay = async () => { alert('共有にはFirebaseの設定とログインが必要です。'); return null; };
-  window._fbLoadPublicPlay = async () => null;
 }
 </script>
 <script>
@@ -654,41 +625,9 @@ input,textarea,select{-webkit-user-select:text;user-select:text;}
   box-shadow:0 3px 12px rgba(0,168,107,.4);z-index:300;display:none;
   animation:fadeup .4s ease;}
 @keyframes fadeup{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
-/* ===== 埋め込み（再生専用）モード ===== */
-body.embed #hdr,
-body.embed #sb-wrap,
-body.embed #frame-memo-bar,
-body.embed #bar .btn.success,
-body.embed #bar [onclick*="showVideoExportModal"],
-body.embed #bar [onclick*="showPDFChoiceModal"],
-body.embed #bar #btn-del,
-body.embed #bar .bar-tab-btn,
-body.embed #bar #frames-strip,
-body.embed #bar .sep,
-body.embed #sync-badge { display: none !important; }
-body.embed #main { height: 100vh; }
-body.embed #cw { width: 100%; }
-body.embed #bar {
-  justify-content: center; gap: 14px; padding: 8px 10px;
-  background: var(--panel); border-top: 1px solid var(--border);
-}
-body.embed #bar .btn { font-size: 15px; padding: 9px 16px; }
-body.embed { overflow: hidden; }
-#embed-loading {
-  position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
-  flex-direction: column; gap: 12px; background: var(--bg); z-index: 9999;
-  color: var(--text); font-size: 14px;
-}
-#embed-loading .sp {
-  width: 30px; height: 30px; border: 3px solid var(--border); border-top-color: var(--accent);
-  border-radius: 50%; animation: embspin 0.8s linear infinite;
-}
-@keyframes embspin { to { transform: rotate(360deg); } }
-#embed-error { padding: 20px; text-align: center; color: var(--text); font-size: 14px; line-height: 1.7; }
 </style>
 </head>
 <body>
-<div id="embed-loading" style="display:none"><div class="sp"></div><div>作戦板を読み込み中…</div></div>
 <div id="sync-badge">☁️ 同期完了</div>
 <header id="hdr">
   <button class="hbtn" onclick="toggleSB()">☰</button>
@@ -735,9 +674,11 @@ body.embed { overflow: hidden; }
       </div>
 
       <div class="sec" style="margin-top:3px">色</div>
-      <div style="display:flex;gap:8px;padding:2px">
+      <div style="display:flex;gap:8px;padding:2px;flex-wrap:wrap">
         <div class="cswatch active" style="background:#222;color:#fff" data-color="#111111" onclick="setColor(this)">黒</div>
         <div class="cswatch" style="background:#e53935;color:#fff" data-color="#e53935" onclick="setColor(this)">赤</div>
+        <div class="cswatch" style="background:#3b82f6;color:#fff" data-color="#3b82f6" onclick="setColor(this)">青</div>
+        <div class="cswatch" style="background:#9ca3af;color:#fff" data-color="#9ca3af" onclick="setColor(this)">灰</div>
       </div>
 
       <div class="sec" style="margin-top:3px">表示</div>
@@ -755,6 +696,7 @@ body.embed { overflow: hidden; }
         <button class="tbtn" onclick="addMisc('cone')"><span class="ic">🔺</span>コーン</button>
         <button class="tbtn" onclick="addMisc('circle')"><span class="ic">⭕</span>サークル</button>
         <button class="tbtn" onclick="addMisc('square')"><span class="ic">⬜</span>スクエア</button>
+        <button class="tbtn" onclick="addMisc('text')"><span class="ic">Aa</span>テキスト</button>
         <button class="tbtn" onclick="clearMiscs()"><span class="ic">✕</span>全削除</button>
       </div>
 
@@ -947,8 +889,6 @@ body.embed { overflow: hidden; }
     <div style="display:flex;gap:10px;padding-top:4px;">
       <button class="btn primary" onclick="loadPlayFromDetail()" style="flex:1;justify-content:center;
         font-size:14px;padding:12px;">📋 作戦板で開く</button>
-      <button class="btn" onclick="sharePlayFromDetail()" style="flex:1;justify-content:center;
-        font-size:14px;padding:12px;background:#00897b;color:#fff;border-color:#00897b;">🔗 共有リンク</button>
     </div>
    </div>
   </div>
@@ -1176,7 +1116,6 @@ function updatePlanUI(){
     badge.textContent = userPlan==='pro' ? 'PRO' : 'FREE';
     badge.className = 'plan-badge ' + (userPlan==='pro' ? 'pro' : 'free');
   }
-  // Show subscription manage link for Pro users
   const manageLink = document.getElementById('manage-sub-link');
   if(manageLink){
     manageLink.style.display = (userPlan==='pro' && stripeCustomerId) ? 'block' : 'none';
@@ -1323,76 +1262,95 @@ async function handleAuth(){
 
 async function syncFromCloud(){
   if(!currentUser) return;
+
+  // ① まずIndexedDBからローカルデータを読み込む（オフライン中に保存されたデータを拾う）
+  let idbData = null;
+  if(window._idbLoad){
+    try{ idbData = await window._idbLoad(); }catch(e){ console.error('IDB load error:', e); }
+  }
+
+  // ② IDベースのマージヘルパー: メモリ(低) → IDB(中) → クラウド(高) の優先度で統合
+  function mergeById(cloudArr, idbArr, memArr){
+    const map = new Map();
+    (memArr||[]).forEach(item => { if(item && item.id) map.set(item.id, item); });
+    (idbArr||[]).forEach(item => { if(item && item.id) map.set(item.id, item); });
+    (cloudArr||[]).forEach(item => { if(item && item.id) map.set(item.id, item); });
+    return Array.from(map.values());
+  }
+
   try{
     const data = await window._fbLoadData(currentUser.uid);
-    const hasData = (data.plays && data.plays.length>0) ||
+    const hasCloud = (data.plays && data.plays.length>0) ||
                     (data.drills && data.drills.length>0) ||
                     (data.folders && data.folders.length>0) ||
                     (data.playFolders && data.playFolders.length>0);
-    if(hasData){
-      if(data.plays && data.plays.length > 0){
-        const cloudIds = new Set(data.plays.map(p=>p.id));
-        const localOnly = plays.filter(p=>!cloudIds.has(p.id));
-        plays = [...data.plays, ...localOnly];
+    const hasIdb = idbData && ((idbData.plays && idbData.plays.length>0) ||
+                    (idbData.drills && idbData.drills.length>0));
+
+    if(hasCloud || hasIdb){
+      // plays/drills/playbooks: クラウド + IDB + メモリ をID基準でマージ
+      plays = mergeById(data.plays, idbData ? idbData.plays : null, plays);
+      drills = mergeById(data.drills, idbData ? idbData.drills : null, drills);
+      playbooks = mergeById(data.playbooks, idbData ? idbData.playbooks : null, playbooks);
+
+      // フォルダ: クラウド優先、なければIDB
+      function pickFolder(cloudVal, idbKey){
+        if(cloudVal && cloudVal.length > 0) return cloudVal;
+        if(idbData && idbData[idbKey] && idbData[idbKey].length > 0) return idbData[idbKey];
+        return [];
       }
-      // フォルダ: 旧形式(playFolders/drillFolders)からの移行 + 新4分割形式
-      if(data.playFoldersHalf && data.playFoldersHalf.length > 0) playFoldersHalf = data.playFoldersHalf;
-      if(data.playFoldersFull && data.playFoldersFull.length > 0) playFoldersFull = data.playFoldersFull;
-      if(data.drillFoldersHalf && data.drillFoldersHalf.length > 0) drillFoldersHalf = data.drillFoldersHalf;
-      if(data.drillFoldersFull && data.drillFoldersFull.length > 0) drillFoldersFull = data.drillFoldersFull;
-      // 旧形式からの移行: playFolders → playFoldersHalf
+      playFoldersHalf  = pickFolder(data.playFoldersHalf,  'playFoldersHalf')  || playFoldersHalf;
+      playFoldersFull  = pickFolder(data.playFoldersFull,  'playFoldersFull')  || playFoldersFull;
+      drillFoldersHalf = pickFolder(data.drillFoldersHalf, 'drillFoldersHalf') || drillFoldersHalf;
+      drillFoldersFull = pickFolder(data.drillFoldersFull, 'drillFoldersFull') || drillFoldersFull;
+      // 旧形式からの移行
       if(playFoldersHalf.length === 0){
         if(data.playFolders && data.playFolders.length > 0) playFoldersHalf = data.playFolders;
         else if(data.folders && data.folders.length > 0) playFoldersHalf = data.folders;
+        else if(idbData && idbData.playFolders && idbData.playFolders.length > 0) playFoldersHalf = idbData.playFolders;
+        else if(idbData && idbData.folders && idbData.folders.length > 0) playFoldersHalf = idbData.folders;
       }
-      if(drillFoldersHalf.length === 0 && data.drillFolders && data.drillFolders.length > 0){
-        drillFoldersHalf = data.drillFolders;
+      if(drillFoldersHalf.length === 0){
+        if(data.drillFolders && data.drillFolders.length > 0) drillFoldersHalf = data.drillFolders;
+        else if(idbData && idbData.drillFolders && idbData.drillFolders.length > 0) drillFoldersHalf = idbData.drillFolders;
       }
       // 後方互換
       playFolders = playFoldersHalf; drillFolders = drillFoldersHalf;
       folders = playFolders;
-      if(data.drills) {
-        const cloudDrillIds = new Set(data.drills.map(d=>d.id));
-        const localDrillsOnly = drills.filter(d=>!cloudDrillIds.has(d.id));
-        drills = [...data.drills, ...localDrillsOnly];
-      }
-      if(data.playbooks && data.playbooks.length > 0){
-        const cloudPbIds = new Set(data.playbooks.map(p=>p.id));
-        const localPbOnly = playbooks.filter(p=>!cloudPbIds.has(p.id));
-        playbooks = [...data.playbooks, ...localPbOnly];
-      }
+
       updatePlaysUI();
-      // ローカルにもバックアップ
-      if(window._idbSave) window._idbSave({plays, drills, playFolders, drillFolders, folders,
-        playFoldersHalf, playFoldersFull, drillFoldersHalf, drillFoldersFull, playbooks}).catch(()=>{});
-      showSyncBadge('☁️ クラウドから読み込みました');
+      // マージ結果をIDBに保存
+      const merged = {plays, drills, playFolders, drillFolders, folders,
+        playFoldersHalf, playFoldersFull, drillFoldersHalf, drillFoldersFull, playbooks};
+      if(window._idbSave) window._idbSave(merged).catch(()=>{});
+      // IDBにしかなかったデータがあればクラウドにもpush
+      if(hasIdb && navigator.onLine){
+        window._fbSaveData(currentUser.uid, merged).catch(e=>console.error('merge push error',e));
+      }
+      showSyncBadge(hasCloud ? '☁️ クラウドから読み込みました' : '📱 ローカルデータを復元');
     }
   } catch(e){
     console.error('sync error',e);
-    // クラウド読み込み失敗 → IndexedDBからフォールバック
-    if(window._idbLoad){
-      try{
-        const local = await window._idbLoad();
-        const hasLocal = (local.plays && local.plays.length > 0) ||
-                         (local.drills && local.drills.length > 0);
-        if(hasLocal){
-          if(local.plays && local.plays.length > 0) plays = local.plays;
-          if(local.drills && local.drills.length > 0) drills = local.drills;
-          if(local.playFolders && local.playFolders.length > 0) playFolders = local.playFolders;
-          if(local.drillFolders && local.drillFolders.length > 0) drillFolders = local.drillFolders;
-          if(local.folders && local.folders.length > 0) folders = local.folders;
-          if(local.playFoldersHalf && local.playFoldersHalf.length > 0) playFoldersHalf = local.playFoldersHalf;
-          if(local.playFoldersFull && local.playFoldersFull.length > 0) playFoldersFull = local.playFoldersFull;
-          if(local.drillFoldersHalf && local.drillFoldersHalf.length > 0) drillFoldersHalf = local.drillFoldersHalf;
-          if(local.drillFoldersFull && local.drillFoldersFull.length > 0) drillFoldersFull = local.drillFoldersFull;
-        if(local.playbooks && local.playbooks.length > 0) playbooks = local.playbooks;
-          // 旧形式マイグレーション
-          if(playFoldersHalf.length===0 && playFolders.length>0) playFoldersHalf = playFolders;
-          if(drillFoldersHalf.length===0 && drillFolders.length>0) drillFoldersHalf = drillFolders;
-          updatePlaysUI();
-          showSyncBadge('📴 オフライン — ローカルデータを復元');
-        }
-      }catch(e2){ console.error('IDB fallback error:', e2); }
+    // クラウド読み込み失敗 → IDBデータがあればそれを使う
+    if(idbData){
+      const hasLocal = (idbData.plays && idbData.plays.length > 0) ||
+                       (idbData.drills && idbData.drills.length > 0);
+      if(hasLocal){
+        if(idbData.plays && idbData.plays.length > 0) plays = idbData.plays;
+        if(idbData.drills && idbData.drills.length > 0) drills = idbData.drills;
+        if(idbData.playFolders && idbData.playFolders.length > 0) playFolders = idbData.playFolders;
+        if(idbData.drillFolders && idbData.drillFolders.length > 0) drillFolders = idbData.drillFolders;
+        if(idbData.folders && idbData.folders.length > 0) folders = idbData.folders;
+        if(idbData.playFoldersHalf && idbData.playFoldersHalf.length > 0) playFoldersHalf = idbData.playFoldersHalf;
+        if(idbData.playFoldersFull && idbData.playFoldersFull.length > 0) playFoldersFull = idbData.playFoldersFull;
+        if(idbData.drillFoldersHalf && idbData.drillFoldersHalf.length > 0) drillFoldersHalf = idbData.drillFoldersHalf;
+        if(idbData.drillFoldersFull && idbData.drillFoldersFull.length > 0) drillFoldersFull = idbData.drillFoldersFull;
+        if(idbData.playbooks && idbData.playbooks.length > 0) playbooks = idbData.playbooks;
+        if(playFoldersHalf.length===0 && playFolders.length>0) playFoldersHalf = playFolders;
+        if(drillFoldersHalf.length===0 && drillFolders.length>0) drillFoldersHalf = drillFolders;
+        updatePlaysUI();
+        showSyncBadge('📴 オフライン — ローカルデータを復元');
+      }
     }
   }
 }
@@ -1770,35 +1728,68 @@ let _miscIdCounter = 0;
 const MISC_COLORS = {
   cone: '#222',
   circle: 'rgba(100,160,210,0.45)',
-  square: 'rgba(100,160,210,0.35)'
+  square: 'rgba(100,160,210,0.35)',
+  text: '#222'
 };
 const MISC_STROKE = {
   cone: null,
   circle: 'rgba(70,130,180,0.7)',
-  square: 'rgba(70,130,180,0.7)'
+  square: 'rgba(70,130,180,0.7)',
+  text: null
 };
 const MISC_DEFAULTS = {
   cone:   {w:14, h:18},
   circle: {w:50, h:50},
-  square: {w:50, h:50}
+  square: {w:50, h:50},
+  text:   {w:100, h:24}
 };
 
 function addMisc(type){
   const {CW, courtH} = CS();
   const def = MISC_DEFAULTS[type];
-  miscs.push({
+  const m = {
     id: 'misc_' + (++_miscIdCounter),
     type,
     x: 100 + Math.random() * (CW - 200),
     y: 150 + Math.random() * (courtH - 250),
     w: def.w, h: def.h
-  });
+  };
+  if(type === 'text'){
+    const txt = prompt('テキストを入力:', 'テキスト');
+    if(!txt) return;
+    m.text = txt;
+    m.fontSize = 16;
+    m.textColor = drawColor;
+    // テキスト幅を推定
+    const tmpCtx = canvas.getContext('2d');
+    tmpCtx.font = 'bold 16px "Noto Sans JP", sans-serif';
+    m.w = Math.max(40, tmpCtx.measureText(txt).width + 12);
+    m.h = 24;
+  }
+  miscs.push(m);
   render();
 }
 
 function clearMiscs(){
   if(miscs.length === 0) return;
   miscs = [];
+  render();
+}
+
+function editMiscText(m){
+  const txt = prompt('テキストを編集:', m.text || '');
+  if(txt === null) return; // キャンセル
+  if(txt === ''){
+    // 空文字 → 削除
+    miscs = miscs.filter(mi => mi.id !== m.id);
+    render();
+    return;
+  }
+  m.text = txt;
+  // テキスト幅を再計算
+  const tmpCtx = canvas.getContext('2d');
+  tmpCtx.font = 'bold ' + (m.fontSize || 16) + 'px "Noto Sans JP", sans-serif';
+  m.w = Math.max(40, tmpCtx.measureText(txt).width + 12);
   render();
 }
 
@@ -1830,6 +1821,18 @@ function drawMiscs(){
       ctx.lineWidth = 2;
       ctx.fillRect(-m.w/2, -m.h/2, m.w, m.h);
       ctx.strokeRect(-m.w/2, -m.h/2, m.w, m.h);
+    } else if(m.type === 'text'){
+      const fs = m.fontSize || 16;
+      ctx.font = 'bold ' + fs + 'px "Noto Sans JP", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      // 白い縁取りで視認性アップ
+      ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+      ctx.lineWidth = 3;
+      ctx.lineJoin = 'round';
+      ctx.strokeText(m.text || '', 0, 1);
+      ctx.fillStyle = m.textColor || '#222';
+      ctx.fillText(m.text || '', 0, 1);
     }
     // 選択時ハンドル
     if(m._selected){
@@ -2880,9 +2883,21 @@ canvas.addEventListener('pointermove', e=>{
   // miscリサイズ
   if(_miscResizing){
     const m = _miscResizing;
-    m.w = Math.max(10, (x - m.x) * 2);
-    m.h = Math.max(10, (y - m.y) * 2);
-    if(m.type === 'cone') m.w = Math.max(8, m.w);
+    if(m.type === 'text'){
+      // テキストはフォントサイズで制御 — 縦方向のドラッグでサイズ変更
+      const newH = Math.max(14, (y - m.y) * 2);
+      const scale = newH / m.h;
+      m.fontSize = Math.max(10, Math.round((m.fontSize || 16) * scale));
+      m.h = newH;
+      // テキスト幅を再計算
+      const tmpCtx = canvas.getContext('2d');
+      tmpCtx.font = 'bold ' + m.fontSize + 'px "Noto Sans JP", sans-serif';
+      m.w = Math.max(40, tmpCtx.measureText(m.text || '').width + 12);
+    } else {
+      m.w = Math.max(10, (x - m.x) * 2);
+      m.h = Math.max(10, (y - m.y) * 2);
+      if(m.type === 'cone') m.w = Math.max(8, m.w);
+    }
     render(); return;
   }
   // miscドラッグ
@@ -2970,6 +2985,12 @@ canvas.addEventListener('click', e=>{
   const isDbl=(now-lastTap<380)&&Math.hypot(x-lastTapXY[0],y-lastTapXY[1])<35;
   lastTap=now;lastTapXY=[x,y];
   if(tool==='select'&&isDbl){
+    // テキストmiscのダブルクリック編集
+    const hMisc = hitTestMisc(x, y);
+    if(hMisc && hMisc.type === 'text'){
+      editMiscText(hMisc);
+      return;
+    }
     const p=hitPlayer(x,y);
     if(p&&p.type==='offense'){p.hasBall=!p.hasBall;render();}
     return;
@@ -2985,6 +3006,11 @@ canvas.addEventListener('click', e=>{
 window.addEventListener('keydown',e=>{
   if(e.key==='Escape'&&curveActive){curveActive=false;curvePoints=[];curvePreviewPt=null;showCurveUI(false);render();}
   if((e.metaKey||e.ctrlKey)&&e.key==='z'){e.preventDefault();undo();}
+  // Delete/Backspaceで選択中のmiscを削除
+  if((e.key==='Delete'||e.key==='Backspace')&&!['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName)){
+    const sel = miscs.find(m => m._selected);
+    if(sel){ e.preventDefault(); miscs = miscs.filter(m => m.id !== sel.id); render(); }
+  }
   // Spaceキーで再生/一時停止（テキスト入力中は除外）
   if(e.code==='Space'){
     const tag=document.activeElement&&document.activeElement.tagName;
@@ -5237,94 +5263,6 @@ function loadPlayFromDetail() {
   closePlayDetail();
 }
 
-// ── 共有リンク（限定公開）の発行 ──
-function _genShareId(){
-  // 推測しにくい22文字程度のID
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  let s = '';
-  const arr = (window.crypto && crypto.getRandomValues) ? crypto.getRandomValues(new Uint8Array(22)) : null;
-  for(let i=0;i<22;i++){
-    const r = arr ? arr[i] : Math.floor(Math.random()*256);
-    s += chars[r % chars.length];
-  }
-  return s;
-}
-async function sharePlayFromDetail(){
-  if(_detailPlayId === null) return;
-  let play = plays.find(p => p.id === _detailPlayId);
-  if(!play) play = drills.find(p => p.id === _detailPlayId);
-  if(!play) return;
-
-  if(!currentUser){
-    alert('共有リンクの発行にはログインが必要です。');
-    return;
-  }
-  if(!play.frames || play.frames.length === 0){
-    alert('フレームが無い作戦板は共有できません。');
-    return;
-  }
-
-  // 既存の共有IDがあれば使い回す（更新）。無ければ新規発行
-  const shareId = play.shareId || _genShareId();
-  try {
-    const ownerName = currentUser.displayName || '';
-    await window._fbSharePlay(play, shareId, ownerName);
-    // 作戦板側にも shareId を記録して次回から同じURLに
-    if(!play.shareId){
-      play.shareId = shareId;
-      syncToCloud();
-    }
-    const url = location.origin + location.pathname + '?embed=' + shareId;
-    showShareModal(url);
-  } catch(e){
-    console.error('share error:', e);
-    alert('共有リンクの発行に失敗しました。通信環境を確認してください。');
-  }
-}
-
-function showShareModal(url){
-  let modal = document.getElementById('share-modal');
-  if(!modal){
-    modal = document.createElement('div');
-    modal.id = 'share-modal';
-    modal.className = 'mo';
-    modal.innerHTML =
-      '<div class="md" style="max-width:440px">'
-      + '<h2>🔗 共有リンク</h2>'
-      + '<p style="font-size:13px;color:var(--text-dim,#666);line-height:1.7;margin:0 0 12px">'
-      + 'このリンクを知っている人だけが、作戦板の再生を見られます。<br>Drill IQの練習メニューやノートに貼り付けて使えます。</p>'
-      + '<input type="text" id="share-url-input" readonly style="width:100%;padding:11px;border:1.5px solid var(--border);border-radius:9px;font-size:13px;background:var(--card);color:var(--text);margin-bottom:6px">'
-      + '<div class="mda" style="margin-top:10px">'
-      + '<button class="btn" onclick="closeShareModal()">閉じる</button>'
-      + '<button class="btn primary" onclick="copyShareUrl()">📋 コピー</button>'
-      + '</div></div>';
-    document.body.appendChild(modal);
-  }
-  modal.querySelector('#share-url-input').value = url;
-  modal.classList.add('show');
-  setTimeout(()=>{ const i = modal.querySelector('#share-url-input'); if(i){ i.focus(); i.select(); } }, 100);
-}
-function closeShareModal(){
-  const m = document.getElementById('share-modal');
-  if(m){ m.classList.remove('show'); }
-}
-function copyShareUrl(){
-  const i = document.getElementById('share-url-input');
-  if(!i) return;
-  const txt = i.value;
-  if(navigator.clipboard && navigator.clipboard.writeText){
-    navigator.clipboard.writeText(txt).then(()=>{ _shareCopied(); }, ()=>_shareCopyFallback(i));
-  } else _shareCopyFallback(i);
-}
-function _shareCopyFallback(i){
-  i.focus(); i.select();
-  try { document.execCommand('copy'); _shareCopied(); } catch(e){ alert('コピーできませんでした'); }
-}
-function _shareCopied(){
-  const btn = document.querySelector('#share-modal .btn.primary');
-  if(btn){ const o = btn.textContent; btn.textContent = '✓ コピーしました'; setTimeout(()=>{ btn.textContent = o; }, 1500); }
-}
-
 function deletePlayFromDetail() {
   if (_detailPlayId === null) return;
   if (!confirm('削除しますか？')) return;
@@ -6118,64 +6056,6 @@ initFrameReorder();
     }catch(e){ console.error('IDB initial load error:', e); }
   }
 })();
-
-// ====== 埋め込み（再生専用）モード： ?embed=shareId ======
-(function(){
-  const params = new URLSearchParams(window.location.search);
-  const shareId = params.get('embed');
-  if(!shareId) return;
-
-  document.body.classList.add('embed');
-  const loading = document.getElementById('embed-loading');
-  if(loading) loading.style.display = 'flex';
-
-  function showEmbedError(msg){
-    if(loading){
-      loading.innerHTML = '<div id="embed-error">⚠️ ' + msg + '</div>';
-    }
-  }
-
-  // Firebaseの公開読み込み関数が用意されるまで待つ
-  let waited = 0;
-  const timer = setInterval(async () => {
-    if(typeof window._fbLoadPublicPlay !== 'function'){
-      waited += 100;
-      if(waited > 8000){ clearInterval(timer); showEmbedError('読み込みに失敗しました（接続を確認してください）'); }
-      return;
-    }
-    clearInterval(timer);
-    try {
-      const rec = await window._fbLoadPublicPlay(shareId);
-      if(!rec || !rec.play){ showEmbedError('この作戦板は見つかりませんでした。<br>リンクが正しいか確認してください。'); return; }
-      const play = rec.play;
-
-      // コートモードを合わせる
-      if(play.courtMode && typeof setCourt === 'function'){
-        try { setCourt(play.courtMode); } catch(e){}
-      }
-      // フレームを読み込む
-      if(typeof cloneFrames === 'function' && Array.isArray(play.frames)){
-        frames = cloneFrames(play.frames);
-        currentFrame = 0;
-        if(frames.length > 0 && typeof loadFrame === 'function') loadFrame(0);
-        if(typeof updateFrameUI === 'function') updateFrameUI();
-        if(typeof resize === 'function') resize();
-        if(typeof render === 'function') render();
-      }
-      if(loading) loading.style.display = 'none';
-
-      // 少し待ってから自動再生
-      setTimeout(() => {
-        if(frames.length > 1 && typeof startPlay === 'function' && !isPlaying){
-          try { startPlay(); } catch(e){}
-        }
-      }, 500);
-    } catch(e){
-      console.error('embed load error:', e);
-      showEmbedError('読み込み中にエラーが発生しました。');
-    }
-  }, 100);
-})();
 </script>
 <!-- Upgrade Modal -->
 <div id="upgrade-modal" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.7);backdrop-filter:blur(4px);display:none;align-items:center;justify-content:center;padding:16px">
@@ -6249,10 +6129,4 @@ initFrameReorder();
 </div>
 
 <script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script>
-function showLegalModal(){ document.getElementById('legal-modal').style.display='flex'; }
-function closeLegalModal(){ document.getElementById('legal-modal').style.display='none'; }
-function showPrivacyModal(){ document.getElementById('privacy-modal').style.display='flex'; }
-function closePrivacyModal(){ document.getElementById('privacy-modal').style.display='none'; }
-</script>
-</body>
-</html>
+function showLegalModal(){ document.getEle
