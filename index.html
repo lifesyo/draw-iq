@@ -6197,31 +6197,41 @@ let _embedMode = false;
   }
   // 共有リンクの埋め込み再生（ビューア専用モード）
   const embedId = params.get('embed');
-  if(embedId && window._fbLoadSharedPlay){
+  if(embedId){
     _embedMode = true;
-    // データ取得を待たずに先に本体UIを隠す（チラ見え防止）
-    enterEmbedMode('作戦板');
-    (async()=>{
-      try{
-        const data = await window._fbLoadSharedPlay(embedId);
-        if(!data || !data.frames || data.frames.length === 0){
-          alert('共有データが見つかりませんでした。');
-          return;
-        }
-        // 共有プレーを読み込み
-        plays = [data];
-        // コートモードを共有データに合わせる
-        if(data.courtMode && typeof setCourt === 'function') setCourt(data.courtMode);
-        loadPlay(data.id);
-        enterEmbedMode(data.name || '作戦板');
-        updateEmbedBar();
-        // 自動再生
-        setTimeout(()=>{ if(frames.length > 0) togglePlay(); }, 600);
-      }catch(e){
-        console.error('embed load error:', e);
-        alert('共有データの読み込みに失敗しました。');
+    // UIを即座に隠す（チラ見え防止）
+    enterEmbedMode('読み込み中...');
+    // Firebaseモジュールは type="module" で遅延実行されるため、
+    // _fbLoadSharedPlay が利用可能になるまでポーリングで待機
+    let _embedRetry = 0;
+    function _tryLoadEmbed(){
+      if(window._fbLoadSharedPlay && typeof window._fbLoadSharedPlay === 'function'){
+        (async()=>{
+          try{
+            const data = await window._fbLoadSharedPlay(embedId);
+            if(!data || !data.frames || data.frames.length === 0){
+              alert('共有データが見つかりませんでした。');
+              return;
+            }
+            plays = [data];
+            if(data.courtMode && typeof setCourt === 'function') setCourt(data.courtMode);
+            loadPlay(data.id);
+            enterEmbedMode(data.name || '作戦板');
+            updateEmbedBar();
+            setTimeout(()=>{ if(frames.length > 0) togglePlay(); }, 600);
+          }catch(e){
+            console.error('embed load error:', e);
+            alert('共有データの読み込みに失敗しました。');
+          }
+        })();
+      } else if(_embedRetry < 50){
+        _embedRetry++;
+        setTimeout(_tryLoadEmbed, 100);
+      } else {
+        alert('Firebaseの読み込みに失敗しました。');
       }
-    })();
+    }
+    _tryLoadEmbed();
   }
 })();
 if(window.innerWidth<600){
