@@ -34,7 +34,7 @@
 if('serviceWorker' in navigator){
   // SW本体をBlobで生成・登録
   const swCode = `
-    const CACHE_NAME = 'draw-iq-v7';
+    const CACHE_NAME = 'draw-iq-v8';
     const PRECACHE = [
       './',
       './index.html'
@@ -786,7 +786,53 @@ input,textarea,select{-webkit-user-select:text;user-select:text;}
   <button class="bar-tab-btn" onclick="openPlaysScreen()" title="プレーリスト">📋 PLAYS</button>
 </div>
 
-
+<!-- ===== 共有ビューア（?embed=）専用 UI ===== -->
+<style>
+body.embed-mode #hdr,
+body.embed-mode #sb-wrap,
+body.embed-mode #bar,
+body.embed-mode #frame-memo-bar,
+body.embed-mode #sync-badge{ display:none !important; }
+body.embed-mode #main{ height:100vh; }
+body.embed-mode #cw{ background:var(--bg); }
+body.embed-mode .curve-hint,
+body.embed-mode #cv-confirm{ display:none !important; }
+#embed-bar{
+  display:none; position:fixed; left:50%; bottom:16px; transform:translateX(-50%);
+  z-index:120; gap:8px; align-items:center;
+  background:rgba(22,27,34,.94); border:1px solid var(--border);
+  border-radius:999px; padding:8px 10px;
+  box-shadow:0 6px 22px rgba(0,0,0,.45); backdrop-filter:blur(6px);
+}
+body.embed-mode #embed-bar{ display:flex; }
+#embed-bar button{
+  background:var(--card); border:1px solid var(--border); color:var(--text);
+  width:44px; height:44px; border-radius:999px; cursor:pointer; font-size:17px;
+  display:flex; align-items:center; justify-content:center; touch-action:manipulation;
+}
+#embed-bar button.primary{ background:var(--accent); color:#062; border-color:var(--accent); font-weight:800; }
+#embed-bar button:active{ opacity:.8; }
+#embed-bar .eb-title{
+  color:var(--text); font-size:13px; font-weight:700; max-width:44vw;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding:0 6px 0 10px;
+}
+#embed-bar .eb-frame{ color:var(--text-dim); font-size:12px; padding-right:6px; min-width:38px; text-align:center; }
+#embed-brand{
+  display:none; position:fixed; top:10px; right:12px; z-index:120;
+  font-family:'Oswald',sans-serif; letter-spacing:2px; font-size:14px;
+  color:var(--accent); opacity:.85; pointer-events:none; user-select:none;
+}
+body.embed-mode #embed-brand{ display:block; }
+</style>
+<div id="embed-brand">🏀 DRAW IQ</div>
+<div id="embed-bar">
+  <span class="eb-title" id="eb-title">作戦板</span>
+  <button id="eb-prev" title="前へ" onclick="prevFrame()">◀</button>
+  <button class="primary" id="eb-play" title="再生" onclick="togglePlay()">▶</button>
+  <button id="eb-next" title="次へ" onclick="nextFrame()">▮▶</button>
+  <button id="eb-replay" title="最初から再生" onclick="embedReplay()">⟲</button>
+  <span class="eb-frame" id="eb-frame">0/0</span>
+</div>
 
 <!-- ====== PLAYS FULLSCREEN ====== -->
 <div id="plays-screen" style="display:none;position:fixed;inset:0;background:var(--bg);z-index:100;
@@ -1056,6 +1102,36 @@ input,textarea,select{-webkit-user-select:text;user-select:text;}
 
 <script>
 'use strict';
+
+// ═══════════════════════════════════════
+//  共有ビューア（?embed=）専用モード
+// ═══════════════════════════════════════
+window.EMBED_VIEW = window.EMBED_VIEW || false;
+
+function enterEmbedMode(playName){
+  window.EMBED_VIEW = true;
+  document.body.classList.add('embed-mode');
+  const t = document.getElementById('eb-title');
+  if(t && playName) t.textContent = playName;
+  try { if(typeof tool !== 'undefined') tool = 'view'; } catch(e){}
+  setTimeout(()=>{ try{ resize(); }catch(e){} }, 30);
+}
+
+function updateEmbedBar(){
+  if(!window.EMBED_VIEW) return;
+  const fr = document.getElementById('eb-frame');
+  if(fr) fr.textContent = (frames.length===0?0:(currentFrame+1)) + '/' + frames.length;
+  const pb = document.getElementById('eb-play');
+  if(pb) pb.textContent = (typeof isPlaying!=='undefined' && isPlaying) ? '⏸' : '▶';
+}
+
+function embedReplay(){
+  try{
+    if(typeof isPlaying!=='undefined' && isPlaying && typeof stopPlay==='function') stopPlay();
+    if(frames.length>0 && typeof loadFrame==='function') loadFrame(0);
+    setTimeout(()=>{ if(frames.length>0 && typeof togglePlay==='function') togglePlay(); }, 120);
+  }catch(e){ console.error('embedReplay error', e); }
+}
 
 // ═══════════════════════════════════════
 //  STATE
@@ -2809,6 +2885,7 @@ function hitArrow(x,y) {
 }
 
 canvas.addEventListener('pointerdown', e=>{
+  if(window.EMBED_VIEW) return;
   e.preventDefault();
   const {x,y}=getPos(e);
   if(tool==='pen'){
@@ -2884,6 +2961,7 @@ canvas.addEventListener('pointerdown', e=>{
 },{passive:false});
 
 canvas.addEventListener('pointermove', e=>{
+  if(window.EMBED_VIEW) return;
   if(dragTarget||isDrawing||curveActive||_miscDragging||_miscResizing||_miscRotating||_penDrawing) e.preventDefault();
   const {x,y}=getPos(e);
   // pen drawing
@@ -2941,6 +3019,7 @@ canvas.addEventListener('pointermove', e=>{
 },{passive:false});
 
 canvas.addEventListener('pointerup', e=>{
+  if(window.EMBED_VIEW) return;
   const {x,y}=getPos(e);
   // pen stroke finish
   if(_penDrawing){
@@ -3001,6 +3080,7 @@ canvas.addEventListener('pointerup', e=>{
 
 let lastTap=0,lastTapXY=[0,0];
 canvas.addEventListener('click', e=>{
+  if(window.EMBED_VIEW) return;
   const {x,y}=getPos(e);const now=Date.now();
   const isDbl=(now-lastTap<380)&&Math.hypot(x-lastTapXY[0],y-lastTapXY[1])<35;
   lastTap=now;lastTapXY=[x,y];
@@ -3407,6 +3487,7 @@ function updateFrameUI(){
     memoBar.style.display = 'none';
     memoInput.value = '';
   }
+  if(window.EMBED_VIEW) updateEmbedBar();
 }
 
 function saveFrameMemo(){
@@ -6114,10 +6195,12 @@ let _embedMode = false;
   } else if(params.get('checkout')==='cancel' || params.get('payment')==='cancelled'){
     window.history.replaceState({}, '', window.location.pathname);
   }
-  // 共有リンクの埋め込み再生
+  // 共有リンクの埋め込み再生（ビューア専用モード）
   const embedId = params.get('embed');
   if(embedId && window._fbLoadSharedPlay){
     _embedMode = true;
+    // データ取得を待たずに先に本体UIを隠す（チラ見え防止）
+    enterEmbedMode('作戦板');
     (async()=>{
       try{
         const data = await window._fbLoadSharedPlay(embedId);
@@ -6127,7 +6210,11 @@ let _embedMode = false;
         }
         // 共有プレーを読み込み
         plays = [data];
+        // コートモードを共有データに合わせる
+        if(data.courtMode && typeof setCourt === 'function') setCourt(data.courtMode);
         loadPlay(data.id);
+        enterEmbedMode(data.name || '作戦板');
+        updateEmbedBar();
         // 自動再生
         setTimeout(()=>{ if(frames.length > 0) togglePlay(); }, 600);
       }catch(e){
@@ -6253,4 +6340,10 @@ initFrameReorder();
 </div>
 
 <script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script>
-function showLegalModal(){ document.getEle
+function showLegalModal(){ var m=document.getElementById('legal-modal'); if(m) m.style.display='flex'; }
+function closeLegalModal(){ var m=document.getElementById('legal-modal'); if(m) m.style.display='none'; }
+function showPrivacyModal(){ var m=document.getElementById('privacy-modal'); if(m) m.style.display='flex'; }
+function closePrivacyModal(){ var m=document.getElementById('privacy-modal'); if(m) m.style.display='none'; }
+</script>
+</body>
+</html>
