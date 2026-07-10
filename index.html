@@ -34,7 +34,7 @@
 if('serviceWorker' in navigator){
   // SW本体をBlobで生成・登録
   const swCode = `
-    const CACHE_NAME = 'draw-iq-v8';
+    const CACHE_NAME = 'draw-iq-v9';
     const PRECACHE = [
       './',
       './index.html'
@@ -844,6 +844,9 @@ body.embed-mode #embed-brand{ display:block; }
       color:#fff;width:38px;height:38px;border-radius:8px;font-size:20px;cursor:pointer;
       display:flex;align-items:center;justify-content:center;touch-action:manipulation;">←</button>
     <span style="font-family:'Bebas Neue',cursive;font-size:22px;color:#fff;letter-spacing:2px;flex:1">PLAYS</span>
+    <button class="btn" style="background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.3);
+      color:#fff;padding:4px 8px;font-size:13px" onclick="document.getElementById('play-import-input').click()">📥 JSON</button>
+    <input type="file" id="play-import-input" accept=".json,application/json" style="display:none" onchange="importPlayJSON(this)">
     <button class="btn" style="background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.3);
       color:#fff;padding:4px 8px;font-size:13px" onclick="showFolderModal()">📁</button>
   </div>
@@ -3928,10 +3931,33 @@ function animTrans(fromF,toF,dur,onDone){
     const _isBlkC = a => (!a.color || a.color === '#111111' || a.color === '#111');
     const hasOptArr = (fromF.arrows||[]).some(a => !_isBlkC(a));
     if(!hasOptArr){
-      if(fromF.resultPlayers) players = cloneP(fromF.resultPlayers);
-      else players = cloneP(toF.players);
-      arrows = [];
-      render(); onDone(); return;
+      // 矢印なし: 次フレームの選手位置へ直線補間アニメ（動画再現プレー等に対応）
+      const _lerpTarget = (toF && toF.players) ? toF.players : (fromF.resultPlayers || fromF.players);
+      const _moved = fromF.players.some(fp => {
+        const tp = _lerpTarget.find(p => String(p.id) === String(fp.id));
+        return tp && Math.hypot(tp.x - fp.x, tp.y - fp.y) > 2;
+      });
+      if(!_moved){
+        // 位置変化なし: 従来通り即時遷移
+        players = cloneP(_lerpTarget);
+        arrows = [];
+        render(); onDone(); return;
+      }
+      const stL = performance.now();
+      _pausedElapsed = 0;
+      function tickLerp(now){
+        if(!isPlaying){ _pausedElapsed = now - stL; return; }
+        const tL = Math.min(1, (now - stL) / dur);
+        _pausedElapsed = now - stL;
+        render(fromF, toF, tL, 1, []);
+        if(tL < 1){ animTimer = requestAnimationFrame(tickLerp); return; }
+        players = cloneP(_lerpTarget);
+        arrows = [];
+        _pausedElapsed = 0; _pausedFromF = null; _pausedToF = null;
+        render(); onDone();
+      }
+      animTimer = requestAnimationFrame(tickLerp);
+      return;
     }
     // 赤矢印のみ: 表示→移動のアニメーション
     const optShowDur = 1200;
@@ -5113,6 +5139,57 @@ function clearSearch(){
   document.getElementById('plays-search').value='';
   filterPlays('');
 }
+// ═══════════════════════════════════════
+//  PLAY JSON IMPORT（📥 JSONボタン）
+// ═══════════════════════════════════════
+function importPlayJSON(input){
+  const file = input.files && input.files[0];
+  input.value = '';
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = function(e){
+    let data;
+    try { data = JSON.parse(e.target.result); }
+    catch(err){ alert('JSONの解析に失敗しました: ' + err.message); return; }
+    // 単一プレー / {plays:[...]} の両対応
+    const items = Array.isArray(data) ? data : (data.plays && Array.isArray(data.plays) ? data.plays : [data]);
+    let added = 0, errs = [];
+    items.forEach((p, i) => {
+      if(!p || !Array.isArray(p.frames) || p.frames.length === 0){
+        errs.push('項目' + (i+1) + ': frames がありません'); return;
+      }
+      const ok = p.frames.every(f => f && Array.isArray(f.players) &&
+        f.players.every(pl => pl && pl.id != null && typeof pl.x === 'number' && typeof pl.y === 'number'));
+      if(!ok){ errs.push('項目' + (i+1) + ': players の形式が不正です'); return; }
+      const entry = {
+        id: Date.now() + added,
+        name: (p.name || 'インポートしたプレー').slice(0, 60),
+        folderId: null,
+        courtMode: (p.courtMode === 'full' ? 'full' : 'half'),
+        frames: p.frames.map(f => ({
+          players: f.players.map(pl => ({...pl})),
+          arrows: Array.isArray(f.arrows) ? f.arrows : [],
+          passReceiverId: f.passReceiverId != null ? f.passReceiverId : null,
+          resultPlayers: Array.isArray(f.resultPlayers) ? f.resultPlayers.map(pl => ({...pl})) : f.players.map(pl => ({...pl})),
+          playerArrowMap: f.playerArrowMap || {},
+          memo: typeof f.memo === 'string' ? f.memo : '',
+          miscs: Array.isArray(f.miscs) ? f.miscs : [],
+          penStrokes: Array.isArray(f.penStrokes) ? f.penStrokes : []
+        }))
+      };
+      plays.push(entry);
+      added++;
+    });
+    if(added > 0){
+      try { if(typeof syncToCloud === 'function' && currentUser) syncToCloud(); } catch(e){}
+      const cm = items[0] && items[0].courtMode === 'full' ? 'plays-full' : 'plays-half';
+      try { switchPlaysTab(cm); } catch(e){}
+    }
+    alert(added + '件のプレーを取り込みました。' + (errs.length ? '\n\nエラー:\n' + errs.join('\n') : ''));
+  };
+  reader.readAsText(file);
+}
+
 function openPlaysScreen(){
   document.getElementById('plays-screen').style.display='flex';
   _searchQuery='';
