@@ -1,9 +1,9 @@
 /**
  * POST /api/webhook  （Stripe からの通知を受け取る唯一の入口）
  *
- * 変更点：subscriptions ドキュメントに email と firebaseUid を保存します。
- * これにより、Firebaseプロジェクトが別の Play IQ からも
- * メールアドレスで契約状態を引けるようになります。
+ * 2026-02-25 以降の Stripe API では current_period_end が
+ * サブスクリプション本体ではなく items[].current_period_end に移動しました。
+ * 日付が取れないときに例外で処理全体が止まらないよう、すべて安全に扱います。
  */
 const Stripe = require('stripe');
 const admin = require('firebase-admin');
@@ -28,7 +28,22 @@ async function getRawBody(req) {
   });
 }
 
-/** Stripeの顧客IDからメールアドレスを取る（失敗しても止めない） */
+/** UNIX秒 → ISO文字列。取れなければ null（例外を出さない） */
+function iso(ts) {
+  const n = Number(ts);
+  if (!n || !isFinite(n)) return null;
+  const d = new Date(n * 1000);
+  return isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+/** 新旧どちらの API でも期間終了日を取る */
+function periodEnd(sub) {
+  if (!sub) return null;
+  if (sub.current_period_end) return iso(sub.current_period_end);
+  const item = sub.items && sub.items.data && sub.items.data[0];
+  return item ? iso(item.current_period_end) : null;
+}
+
 async function customerEmail(stripe, customerId, fallback) {
   if (fallback) return String(fallback).toLowerCase();
   try {
@@ -38,11 +53,14 @@ async function customerEmail(stripe, customerId, fallback) {
 }
 
 async function save(uid, patch) {
-  if (!uid) return;
+  if (!uid) { console.error('save skipped: firebaseUid missing'); return; }
+  const clean = {};
+  Object.keys(patch).forEach(k => { if (patch[k] !== undefined) clean[k] = patch[k]; });
   await db.collection('subscriptions').doc(uid).set(
-    Object.assign({ firebaseUid: uid, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, patch),
+    Object.assign({ firebaseUid: uid, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, clean),
     { merge: true }
   );
+  console.log('subscription saved', uid, clean.plan, clean.status);
 }
 
 const handler = async (req, res) => {
@@ -64,52 +82,57 @@ const handler = async (req, res) => {
     switch (event.type) {
       case 'checkout.session.completed': {
         const session = event.data.object;
-        const subscription = await stripe.subscriptions.retrieve(session.subscription);
-        const uid = subscription.metadata.firebaseUid || (session.metadata && session.metadata.firebaseUid);
+        if (!session.subscription) break;
+        const sub = await stripe.subscriptions.retrieve(session.subscription);
+        const uid = sub.metadata.firebaseUid || (session.metadata && session.metadata.firebaseUid);
         const email = await customerEmail(
           stripe, session.customer,
-          subscription.metadata.email || session.customer_details?.email
+          sub.metadata.email || (session.customer_details && session.customer_details.email)
         );
-        // trialing も利用可とする
-        const active = ['active', 'trialing'].includes(subscription.status);
+        const active = ['active', 'trialing'].includes(sub.status);
         await save(uid, {
           plan: active ? 'pro' : 'free',
-          status: subscription.status,
+          status: sub.status,
           email: email,
           stripeCustomerId: session.customer,
           stripeSubscriptionId: session.subscription,
-          trialEnd: subscription.trial_end ? new Date(subscription.trial_end * 1000).toISOString() : null,
-          currentPeriodEnd: new Date(subscription.current_period_end * 1000).toISOString()
+          trialEnd: iso(sub.trial_end),
+          currentPeriodEnd: periodEnd(sub)
         });
         break;
       }
 
+      case 'customer.subscription.created':
       case 'customer.subscription.updated':
       case 'customer.subscription.trial_will_end': {
         const sub = event.data.object;
-        const uid = sub.metadata.firebaseUid;
-        const email = await customerEmail(stripe, sub.customer, sub.metadata.email);
+        const uid = sub.metadata && sub.metadata.firebaseUid;
+        const email = await customerEmail(stripe, sub.customer, sub.metadata && sub.metadata.email);
         const active = ['active', 'trialing'].includes(sub.status);
         await save(uid, {
           plan: active ? 'pro' : 'free',
           status: sub.status,
           email: email,
           stripeCustomerId: sub.customer,
-          trialEnd: sub.trial_end ? new Date(sub.trial_end * 1000).toISOString() : null,
-          currentPeriodEnd: new Date(sub.current_period_end * 1000).toISOString()
+          stripeSubscriptionId: sub.id,
+          trialEnd: iso(sub.trial_end),
+          currentPeriodEnd: periodEnd(sub)
         });
         break;
       }
 
       case 'customer.subscription.deleted': {
         const sub = event.data.object;
-        await save(sub.metadata.firebaseUid, { plan: 'free', status: 'canceled' });
+        await save(sub.metadata && sub.metadata.firebaseUid, { plan: 'free', status: 'canceled' });
         break;
       }
 
       case 'invoice.payment_failed': {
         const invoice = event.data.object;
-        const sub = invoice.subscription ? await stripe.subscriptions.retrieve(invoice.subscription) : null;
+        const subId = invoice.subscription ||
+          (invoice.parent && invoice.parent.subscription_details && invoice.parent.subscription_details.subscription);
+        if (!subId) break;
+        const sub = await stripe.subscriptions.retrieve(subId);
         if (sub && sub.metadata && sub.metadata.firebaseUid) {
           await save(sub.metadata.firebaseUid, { plan: 'free', status: 'payment_failed' });
         }
@@ -117,7 +140,7 @@ const handler = async (req, res) => {
       }
     }
   } catch (err) {
-    console.error('Webhook processing error:', err);
+    console.error('Webhook processing error:', event && event.type, err);
   }
 
   res.status(200).json({ received: true });
