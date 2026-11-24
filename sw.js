@@ -1,4 +1,4 @@
-const CACHE_NAME = 'draw-iq-v7';
+const CACHE_NAME = 'draw-iq-v8';
 const PRECACHE = [
   './',
   './index.html'

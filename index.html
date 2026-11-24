@@ -34,7 +34,7 @@
 if('serviceWorker' in navigator){
   // SW本体をBlobで生成・登録
   const swCode = `
-    const CACHE_NAME = 'draw-iq-v9';
+    const CACHE_NAME = 'draw-iq-v10';
     const PRECACHE = [
       './',
       './index.html'
@@ -335,7 +335,8 @@ if (FIREBASE_CONFIG) {
     if(b){ b.textContent = '🌐 オンラインに復帰'; b.style.display='block';
       clearTimeout(b._t); b._t = setTimeout(()=>b.style.display='none', 2500); }
     // オンライン復帰時にクラウド同期を試行
-    if(window.currentUser && typeof window.syncToCloud === 'function') window.syncToCloud();
+    // ※ currentUser は let 変数で window には載らないため、判定は syncToCloud 側に任せる
+    if(typeof window.syncToCloud === 'function') window.syncToCloud();
   });
   window.addEventListener('offline', () => {
     const b = document.getElementById('sync-badge');
@@ -1202,11 +1203,26 @@ async function checkSubscription(){
   if(OWNER_UIDS.includes(currentUser.uid)){ userPlan='pro'; localStorage.setItem('diq_owner_pro','1'); console.log('[DIQ-DEBUG] owner matched, set pro'); updatePlanUI(); return; }
   try{
     const r = await fetch('/api/check-subscription?uid=' + currentUser.uid);
+    // オフライン時はSWが 503 '{}' を返すので、ここで失敗扱いにする（以前はFREEに落ちていた）
+    if(!r.ok) throw new Error('check-subscription HTTP ' + r.status);
     const d = await r.json();
     userPlan = d.plan || 'free';
     stripeCustomerId = d.stripeCustomerId || null;
-  }catch(e){ console.error('checkSubscription error',e); userPlan='free'; }
+    _diqSetLastPlan(userPlan);
+  }catch(e){
+    console.error('checkSubscription error',e);
+    // 通信できないとき：直近14日以内に確認できた契約を尊重する（体育館などの電波なし対策）
+    userPlan = _diqGetLastPlan() ? 'pro' : 'free';
+  }
   updatePlanUI();
+}
+const DIQ_PLAN_GRACE_MS = 14 * 24 * 60 * 60 * 1000;
+function _diqLastPlanKey(){ return 'diq_last_plan_' + (currentUser ? currentUser.uid : ''); }
+function _diqSetLastPlan(plan){
+  try{ plan === 'pro' ? localStorage.setItem(_diqLastPlanKey(), String(Date.now())) : localStorage.removeItem(_diqLastPlanKey()); }catch(e){}
+}
+function _diqGetLastPlan(){
+  try{ const at = Number(localStorage.getItem(_diqLastPlanKey()) || 0); return at > 0 && (Date.now() - at) < DIQ_PLAN_GRACE_MS; }catch(e){ return false; }
 }
 
 function updatePlanUI(){
@@ -1369,11 +1385,26 @@ async function syncFromCloud(){
   }
 
   // ② IDベースのマージヘルパー: メモリ(低) → IDB(中) → クラウド(高) の優先度で統合
-  function mergeById(cloudArr, idbArr, memArr){
+  //    ただしオフライン中に保存した未同期の変更がある場合は端末側(IDB)を優先する。
+  //    （Firestoreのオフラインキャッシュや古いクラウドデータで、オフライン中の記録が上書きされないように）
+  const pending = _diqIsPending();
+  const synced = _diqLoadSyncedIds();
+  function mergeById(cloudArr, idbArr, memArr, kind){
+    if(pending) return mergeLocalFirst(cloudArr, idbArr, memArr, kind);
     const map = new Map();
     (memArr||[]).forEach(item => { if(item && item.id) map.set(item.id, item); });
     (idbArr||[]).forEach(item => { if(item && item.id) map.set(item.id, item); });
     (cloudArr||[]).forEach(item => { if(item && item.id) map.set(item.id, item); });
+    return Array.from(map.values());
+  }
+  // 端末優先マージ: クラウドにしか無いものは「前回同期時に無かった＝他端末で追加」なら残し、
+  // 「前回同期時にあった＝この端末でオフライン中に削除」なら削除のまま
+  function mergeLocalFirst(cloudArr, idbArr, memArr, kind){
+    const known = new Set((synced && synced[kind]) || []);
+    const map = new Map();
+    (cloudArr||[]).forEach(item => { if(item && item.id != null && !known.has(String(item.id))) map.set(String(item.id), item); });
+    (memArr||[]).forEach(item => { if(item && item.id != null) map.set(String(item.id), item); });
+    (idbArr||[]).forEach(item => { if(item && item.id != null) map.set(String(item.id), item); });
     return Array.from(map.values());
   }
 
@@ -1388,12 +1419,13 @@ async function syncFromCloud(){
 
     if(hasCloud || hasIdb){
       // plays/drills/playbooks: クラウド + IDB + メモリ をID基準でマージ
-      plays = mergeById(data.plays, idbData ? idbData.plays : null, plays);
-      drills = mergeById(data.drills, idbData ? idbData.drills : null, drills);
-      playbooks = mergeById(data.playbooks, idbData ? idbData.playbooks : null, playbooks);
+      plays = mergeById(data.plays, idbData ? idbData.plays : null, plays, 'plays');
+      drills = mergeById(data.drills, idbData ? idbData.drills : null, drills, 'drills');
+      playbooks = mergeById(data.playbooks, idbData ? idbData.playbooks : null, playbooks, 'playbooks');
 
       // フォルダ: クラウド優先、なければIDB
       function pickFolder(cloudVal, idbKey){
+        if(pending && idbData && idbData[idbKey] && idbData[idbKey].length > 0) return idbData[idbKey];
         if(cloudVal && cloudVal.length > 0) return cloudVal;
         if(idbData && idbData[idbKey] && idbData[idbKey].length > 0) return idbData[idbKey];
         return [];
@@ -1423,10 +1455,11 @@ async function syncFromCloud(){
         playFoldersHalf, playFoldersFull, drillFoldersHalf, drillFoldersFull, playbooks};
       if(window._idbSave) window._idbSave(merged).catch(()=>{});
       // IDBにしかなかったデータがあればクラウドにもpush
-      if(hasIdb && navigator.onLine){
-        window._fbSaveData(currentUser.uid, merged).catch(e=>console.error('merge push error',e));
+      if((hasIdb || pending) && navigator.onLine){
+        _diqPush(merged).catch(e=>console.error('merge push error',e));
       }
-      showSyncBadge(hasCloud ? '☁️ クラウドから読み込みました' : '📱 ローカルデータを復元');
+      showSyncBadge(pending ? (navigator.onLine ? '☁️ オフライン中の記録を同期しています' : '📴 オフライン — 端末の記録を復元')
+                            : (hasCloud ? '☁️ クラウドから読み込みました' : '📱 ローカルデータを復元'));
     }
   } catch(e){
     console.error('sync error',e);
@@ -1463,15 +1496,51 @@ async function syncToCloud(){
   }
   if(!currentUser) return;
   if(!navigator.onLine){
-    showSyncBadge('📴 オフライン — ローカル保存済み');
+    _diqSetPending(true);
+    showSyncBadge('📴 オフライン — 端末に保存済み（復帰時に同期）');
     return;
   }
   try{
-    await window._fbSaveData(currentUser.uid, {plays, folders, drills, playFolders, drillFolders,
+    await _diqPush({plays, folders, drills, playFolders, drillFolders,
       playFoldersHalf, playFoldersFull, drillFoldersHalf, drillFoldersFull, playbooks});
     showSyncBadge('☁️ 同期しました');
-  } catch(e){ console.error('save error',e); showSyncBadge('⚠️ 同期エラー（ローカル保存済み）'); }
+  } catch(e){ console.error('save error',e); showSyncBadge('⚠️ 同期エラー（端末に保存済み）'); }
 }
+
+// ── オフライン保存の未同期管理 ──
+// diq_pending_sync_{uid}: 端末にだけ保存されていてクラウド未反映の変更がある
+// diq_synced_ids_{uid}  : 最後にクラウドへ送れたときのID一覧（オフライン中の削除と他端末の追加を見分ける）
+let _diqPushSeq = 0;
+function _diqPendKey(){ return 'diq_pending_sync_' + (currentUser ? currentUser.uid : ''); }
+function _diqIdsKey(){ return 'diq_synced_ids_' + (currentUser ? currentUser.uid : ''); }
+function _diqSetPending(on){
+  if(!currentUser) return;
+  try{ on ? localStorage.setItem(_diqPendKey(), '1') : localStorage.removeItem(_diqPendKey()); }catch(e){}
+}
+function _diqIsPending(){
+  if(!currentUser) return false;
+  try{ return localStorage.getItem(_diqPendKey()) === '1'; }catch(e){ return false; }
+}
+function _diqLoadSyncedIds(){
+  try{ return JSON.parse(localStorage.getItem(_diqIdsKey()) || 'null'); }catch(e){ return null; }
+}
+function _diqSaveSyncedIds(data){
+  const ids = arr => (arr || []).filter(x => x && x.id != null).map(x => String(x.id));
+  try{ localStorage.setItem(_diqIdsKey(), JSON.stringify({plays: ids(data.plays), drills: ids(data.drills), playbooks: ids(data.playbooks)})); }catch(e){}
+}
+async function _diqPush(data){
+  const seq = ++_diqPushSeq;
+  _diqSetPending(true);           // 送信完了までは未同期扱い（途中で切れても次回送り直す）
+  await window._fbSaveData(currentUser.uid, data);
+  if(seq === _diqPushSeq){        // 後から始まった送信がある場合はそちらの完了を待つ
+    _diqSetPending(false);
+    _diqSaveSyncedIds(data);
+  }
+}
+// iPhone/iPad では online イベントが来ないことがあるため、画面に戻ったときにも未同期分を送る
+document.addEventListener('visibilitychange', () => {
+  if(document.visibilityState === 'visible' && currentUser && navigator.onLine && _diqIsPending()) syncToCloud();
+});
 
 function showSyncBadge(msg){
   const b = document.getElementById('sync-badge');
