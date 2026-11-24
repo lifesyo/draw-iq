@@ -34,7 +34,7 @@
 if('serviceWorker' in navigator){
   // SW本体をBlobで生成・登録
   const swCode = `
-    const CACHE_NAME = 'draw-iq-v10';
+    const CACHE_NAME = 'draw-iq-v11';
     const PRECACHE = [
       './',
       './index.html'
@@ -6227,14 +6227,14 @@ async function exportPDF(){
     : '';
 
   // レイアウト定数 (px)
-  const cols = 2, rows = 2, perPage = 4;
+  const cols = 2, rows = 3, perPage = cols * rows; // 2-2-2 の6フレーム
   const mg = 50;      // マージン
   const headerH = 60; // タイトル領域
-  const gapX = 40, gapY = 30;
+  const gapX = 40, gapY = 24;
   const cellW = Math.floor((PW - mg*2 - gapX) / cols);
-  const cellH = Math.floor((PH - mg*2 - headerH - gapY) / rows);
+  const cellH = Math.floor((PH - mg*2 - headerH - gapY*(rows-1)) / rows);
   const phaseH = 24;  // Phase番号
-  const memoAreaH = 80; // メモ領域
+  const memoAreaH = 72; // メモ領域（4行×17px）
   const imgAreaH = cellH - phaseH - memoAreaH;
   const imgAspect = expW / expH;
   let iW, iH;
